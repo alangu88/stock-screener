@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-screener"
+version = "0.1.0"
+description = "Trader-style S&P 500 stock screener (Streamlit + Yahoo Finance) with setup detection, trade planning, ranking, portfolio construction, and backtesting."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Alan Gu" }]
+keywords = ["stocks", "screener", "trading", "streamlit", "finance", "backtesting"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+    "plotly>=5.22.0",
+    "streamlit>=1.36.0",
+    "yfinance>=0.2.40",
+    "requests>=2.32.0",
+    "lxml>=6.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/alangu88/stock-screener"
+Repository = "https://github.com/alangu88/stock-screener"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "ruff>=0.6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+

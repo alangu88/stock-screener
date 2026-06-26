@@ -1,2 +1,308 @@
-# stock-screener
-Basic Stock Screener
+# S&P 500 Stock Screener
+
+[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![Daily Screen](../../actions/workflows/daily-screen.yml/badge.svg)](../../actions/workflows/daily-screen.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
+A trader-style stock screener for the S&P 500, built with Python and Streamlit
+on free Yahoo Finance data. Instead of listing indicator matches, it identifies
+actionable trade setups, builds defined-risk trade plans, ranks them by quality,
+and organizes survivors into a Core / Satellite portfolio.
+
+> **Research and educational use only. Not investment advice.** See
+> [Disclaimer](#disclaimer).
+
+
+## Latest Screen
+
+> Generated on demand via the **Daily Screen** workflow or `python scripts/generate_snapshot.py`. Mechanical, research-only.
+
+<!-- SCREENER:START -->
+_Snapshot has not been generated yet. Run the **Daily Screen** workflow or `python scripts/generate_snapshot.py`._
+<!-- SCREENER:END -->
+
+## What It Does
+
+- Universe: S&P 500 constituents only
+- Market focus: NYSE, NASDAQ, AMEX (filtered via Yahoo exchange metadata)
+- Data source: Yahoo Finance via `yfinance` (free)
+- Behaves like a trader hunting actionable setups, not a list of indicator filters. It:
+    1. Identifies a specific setup (Breakout / Volatility Contraction / Pullback / Avoid)
+	2. Builds a structural trade plan (Entry / Stop / Target) with real reward/risk
+	3. Explains itself (reason, key factors, risks, confidence score)
+	4. Ranks survivors by composite quality adjusted for the market regime
+	5. Splits survivors into a Core / Satellite portfolio with risk-based position sizes
+- Only high-quality candidates survive: an identified setup (never `Avoid`), an
+  asymmetric reward/risk, sufficient confidence, and tradable liquidity.
+- Output table columns:
+	- Ticker, Company Name
+	- Setup, Sleeve, Confidence, Core Score, Rank Score
+	- Position Size %
+	- Entry, Stop, Target, Risk %, Risk Contribution %, Reward %, R/R
+	- Reason, Key Factors, Risks
+	- Trend Score, RS Outperformance, Rel Volume, Market Context
+	- Market Cap, PE Ratio, Revenue Growth, Price
+- Features:
+	- Structural setup detection grounded in trader methodologies
+	- Composite ranking by setup quality, relative strength, and reward/risk
+	- Market-regime adjustment (risk-on amplifies, risk-off damps)
+	- Core / Satellite portfolio construction with risk-parity position sizing
+	- Adjustable screen controls (min confidence, min reward/risk, setup types)
+	- Adjustable portfolio controls (core allocation, core threshold, max weight)
+	- Sortable table, pagination, CSV export
+	- Chart panel with selectable period and overlays:
+		- Price (candlesticks)
+		- EMA 20
+		- SMA 50
+		- SMA 200
+		- RSI (separate pane with 70/30 lines)
+		- Volume
+
+## Methodology
+
+The screener encodes principles that recur across leadership-momentum and
+trend-following traders (O'Neil, Minervini, Weinstein, Wyckoff, Darvas, the
+Turtles) rather than arbitrary indicator thresholds:
+
+- **Trade with the primary trend** — a trend-template score (price vs stacked
+  50/150/200 MAs, rising long-term MA, position within the 52-week range)
+  gates every long setup (Weinstein Stage 2, Minervini trend template).
+- **Demand relative-strength leadership** — blended multi-horizon
+  outperformance vs SPY, plus an RS-line-at-new-highs check (O'Neil RS,
+  Minervini RS line).
+- **Prefer supply drying up** — volatility contraction (short/long ATR) and
+  quiet pullbacks to rising support (Minervini VCP, Wyckoff accumulation,
+  Darvas boxes).
+- **Confirmation over prediction** — breakouts require volume expansion;
+  contractions are anticipatory and trigger only on a buy-stop through the
+  pivot.
+- **Capital preservation and asymmetry** — stops sit below the structure that
+  invalidates the thesis (with an ATR cushion) and are capped so no single
+  trade risks more than a set fraction of the position. Targets project the
+  base's measured move, so every surviving plan is asymmetric by construction.
+- **Market context** — the broad-market regime (SPY vs its 50/200 MAs and
+  long-term slope) scales the final rank.
+
+**Why this and not the alternatives?** A pure indicator-filter screen (e.g.
+RSI band + price-above-MA) finds *matches*, not *opportunities*: it ignores
+structure, can't size risk, and floods you with mediocre names. A
+mean-reversion design fights the trend and depends on precise timing. The
+chosen confirmation-based leadership-momentum framework instead favors a small
+number of high-quality, defined-risk setups — quality over quantity.
+
+**Architecture** mirrors the decision flow, each layer pure and testable:
+`indicators` (primitives) → `features` (calculations, no decisions) → `setups`
+(classification, no prices) → `trade_plan` (entry/stop/target from structure)
+→ `ranking` (confidence + market-context-adjusted composite rank) → `portfolio`
+(Core/Satellite sleeves + risk-based sizing) → `engine` (orchestration). All
+calculations are deterministic.
+
+## How to Read the Results Table
+
+Each row is one S&P 500 symbol with an identified, actionable setup. Rows are
+sorted by **Rank Score** (highest first) by default, so the strongest
+opportunities sit at the top. You can re-sort by any column from the sidebar.
+
+### Setup and plan columns
+
+| Column | Meaning |
+| --- | --- |
+| **Setup** | The classified opportunity: `Breakout`, `Volatility Contraction`, or `Pullback`. (`Avoid` candidates are filtered out.) |
+| **Confidence** | 0–100 quality score blending trend, relative strength, setup family, volume/accumulation, contraction, and reward/risk. |
+| **Rank Score** | Confidence scaled by the market regime (`confidence × (0.7 + 0.3 × context)`). |
+| **Entry** | Structural entry — the breakout/pullback price, or a buy-stop at the pivot for a contraction. Not defaulted to the current price unless immediate action is justified. |
+| **Stop** | Protective stop below the invalidating structure (with an ATR cushion), capped so risk never exceeds the configured maximum. |
+| **Target** | Profit objective from the base's measured move. |
+| **Risk %** | `(Entry − Stop) / Entry`. |
+| **Reward %** | `(Target − Entry) / Entry`. |
+| **R/R** | Reward ÷ Risk. Survivors are **≥ 2** by default. |
+
+### Explainability columns
+
+- **Reason**: one-line rationale for the classification.
+- **Key Factors**: the supporting evidence (trend, RS, volume, structure).
+- **Risks**: what could invalidate the setup.
+
+### Setup types
+
+- **Breakout** — Price cleared a base pivot in a leading uptrend, confirmed by volume expansion. Momentum continuation.
+- **Volatility Contraction** — Supply is drying up (short/long ATR contracting) while price coils just below a pivot. Anticipatory; triggers on a buy-stop through the pivot.
+- **Pullback** — Established uptrend that dipped to rising support (20 EMA / 50 MA) on quiet volume while still leading SPY. Buy-the-dip continuation. (Backtesting's strongest, most statistically significant edge.)
+
+> **Reversal** setups were removed: backtesting showed negative expectancy (a high hit rate but an inverted ~0.85 reward/risk), so counter-trend conditions are now treated as `Avoid`.
+
+### Portfolio columns (Core / Satellite)
+
+After screening, survivors are organized into a classic **core-satellite**
+portfolio so the table reads as an allocation plan, not just a watchlist:
+
+- **Sleeve** — `Core` (durable trend-continuation leaders: pullbacks /
+  contractions in larger, trending names — backtesting's strongest edge) or
+  `Satellite` (higher-octane tactical plays, mostly breakouts / smaller names).
+- **Core Score** — 0–1 *core-ness* blend of setup family (40%), confidence
+  (20%), market-cap/liquidity on a log scale (20%), and trend persistence
+  (20%). At or above the threshold (default 0.60) a name joins the Core sleeve.
+- **Position Size %** — suggested weight as a share of the whole book. Capital
+  is split by the **core allocation** (default 70% Core / 30% Satellite), then
+  within each sleeve positions are sized by **risk parity** — equal risk budget
+  per name (inverse of the entry-to-stop distance), tilted by confidence — and
+  capped per name (default 10%). If a sleeve has too few names to deploy its
+  allocation under the cap, the remainder is implicitly held as cash.
+- **Risk Contribution %** — capital actually at risk in that name
+  (`Position Size % × Risk %`); summed per sleeve it is the *portfolio heat*.
+
+A per-sleeve summary panel above the table rolls up positions, allocation,
+portfolio heat, and average quality for Core, Satellite, and the total book.
+All portfolio controls live in the sidebar and the columns are included in the
+CSV export.
+
+### Context columns
+
+- **Trend Score**: fraction of trend-template conditions met (1.0 = textbook uptrend).
+- **RS Outperformance**: blended multi-horizon return vs SPY (positive = leading).
+- **Rel Volume**: latest volume vs its average (× the norm).
+- **Market Context**: broad-market regime (`Risk-On` / `Neutral` / `Risk-Off`).
+- **Market Cap / PE Ratio / Revenue Growth**: fundamentals (blank when Yahoo omits them).
+- **Price**: latest close.
+
+> These are mechanical signals for research only — not trade recommendations.
+Always confirm with your own analysis.
+
+## Project Structure
+
+```
+stock-screener/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                 # tests + lint on push/PR
+│       └── daily-screen.yml       # scheduled README snapshot
+├── scripts/
+│   └── generate_snapshot.py       # headless screen -> README injection
+├── src/
+│   ├── app.py                     # Streamlit UI
+│   ├── config.py                  # Settings + env loading
+│   ├── analysis/
+│   │   ├── indicators.py          # SMA/EMA/RSI/ATR/OBV primitives
+│   │   ├── relative_strength.py   # RS vs benchmark
+│   │   └── features.py            # MarketFeatures (pure calculations)
+│   ├── data/
+│   │   ├── cache.py               # SQLite TTL cache
+│   │   ├── rate_limiter.py        # request throttling + backoff
+│   │   ├── universe.py            # S&P 500 constituents
+│   │   └── yahoo_client.py        # yfinance fetch + retries
+│   ├── export/
+│   │   ├── csv_export.py
+│   │   └── markdown_export.py     # snapshot/README rendering
+│   ├── screener/
+│   │   ├── strategy.py            # central StrategyConfig thresholds
+│   │   ├── setups.py              # setup classification
+│   │   ├── trade_plan.py          # entry/stop/target from structure
+│   │   ├── ranking.py             # confidence + composite rank
+│   │   ├── portfolio.py           # Core/Satellite + risk-parity sizing
+│   │   ├── backtest.py            # bar-replay simulation
+│   │   ├── result.py              # result schema
+│   │   └── engine.py              # pipeline orchestration
+│   └── utils/
+│       ├── errors.py
+│       ├── logger.py
+│       └── numeric.py             # shared clamp/is_nan helpers
+├── tests/
+│   ├── integration/
+│   └── unit/
+├── pyproject.toml
+├── requirements.txt               # runtime dependencies
+└── requirements-dev.txt           # + testing and linting
+```
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+streamlit run src/app.py
+```
+
+For development (tests + linting), install the dev extras instead:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+## Configuration
+
+All settings have sensible defaults and can be overridden with `SCREENER_*`
+environment variables exported in your shell (the app reads the process
+environment directly). Use [`.env.example`](.env.example) as a reference for the
+available variables. The most commonly adjusted values:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SCREENER_CACHE_DIR` | `.cache` | SQLite cache location |
+| `SCREENER_CACHE_TTL_HOURS` | `24` | Cache freshness window |
+| `SCREENER_MAX_RETRIES` | `4` | Yahoo request retry attempts |
+| `SCREENER_REQUEST_DELAY_SECONDS` | `0.25` | Throttle between requests |
+| `SCREENER_FUNDAMENTALS_MAX_WORKERS` | `8` | Fundamentals fetch concurrency |
+| `SCREENER_MIN_AVG_VOLUME` | `500000` | Liquidity gate |
+| `SCREENER_SMA_SHORT_WINDOW` / `SCREENER_SMA_LONG_WINDOW` | `50` / `200` | Trend MAs |
+| `SCREENER_EMA_WINDOW` | `20` | Fast EMA |
+| `SCREENER_ATR_PERIOD` / `SCREENER_ATR_STOP_MULTIPLIER` | `14` / `2.0` | Volatility + stop cushion |
+| `SCREENER_CORE_ALLOCATION` | `0.70` | Core sleeve share of capital |
+| `SCREENER_CORE_SCORE_THRESHOLD` | `0.60` | Core vs Satellite cutoff |
+| `SCREENER_MAX_POSITION_WEIGHT` | `0.10` | Per-name position cap |
+
+See [`.env.example`](.env.example) for the complete list, including the daily
+snapshot variables.
+
+## Backtesting
+
+The app includes a bar-replay backtester that re-runs the **exact same**
+pipeline (`features → setups → trade_plan → ranking`) at each historical bar
+with no look-ahead, then simulates the planned entry/stop/target forward to
+record realized R-multiples. It reports win rate, expectancy (R), and profit
+factor overall and broken down by setup and confidence tier. Because fills are
+assumed at planned levels with no slippage/commissions on a survivorship-biased
+universe, treat the numbers as **relative comparisons, not a profitability
+claim**.
+
+## Development
+
+```bash
+ruff check .     # lint
+pytest           # run the test suite
+```
+
+## Error Handling and Rate Limits
+
+- Exponential backoff retry in Yahoo requests
+- Per-request delay throttling
+- Cache-first reads to reduce API pressure
+- Partial-failure tolerance (bad symbols are skipped)
+
+## Performance Notes
+
+- Caches both historical prices and fundamentals in SQLite (`.cache/screener_cache.sqlite3`)
+- Daily cache TTL by default
+- Manual cache reset via the app button
+- Warm-cache runs are much faster than first runs
+
+## Roadmap
+
+Possible future enhancements:
+
+- Strict fundamentals mode (exclude symbols missing PE or revenue growth).
+- Walk-forward backtest validation and slippage/commission modeling.
+- Supplemental free data sources (e.g. SEC EDGAR insider activity).
+
+## Disclaimer
+
+This project is for research and educational purposes only. It produces
+mechanical signals, **not** investment advice or trade recommendations. Market
+data may be delayed or incomplete, and past performance does not guarantee
+future results. Always do your own analysis. Use at your own risk.
+
+## License
+
+Released under the [MIT License](LICENSE).
+

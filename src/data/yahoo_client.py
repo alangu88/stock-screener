@@ -1,0 +1,213 @@
+from __future__ import annotations
+
+import math
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import Any
+
+import pandas as pd
+import yfinance as yf
+
+from src.config import Settings
+from src.data.cache import SQLiteCache
+from src.data.rate_limiter import RateLimiter, exponential_backoff_sleep
+from src.utils.errors import DataFetchError
+from src.utils.logger import get_logger
+
+ALLOWED_EXCHANGES = {'NYQ', 'NMS', 'ASE'}
+
+
+@dataclass
+class Fundamentals:
+    ticker: str
+    company_name: str | None
+    market_cap: float | None
+    pe_ratio: float | None
+    revenue_growth: float | None
+    exchange: str | None
+
+
+class YahooFinanceClient:
+    def __init__(self, settings: Settings, cache: SQLiteCache) -> None:
+        self.settings = settings
+        self.cache = cache
+        self.rate_limiter = RateLimiter(settings.request_delay_seconds)
+        self.logger = get_logger(self.__class__.__name__)
+
+    def _with_retry(self, call: Callable[[], Any], operation: str) -> Any:
+        """Run ``call`` with rate limiting and exponential backoff.
+
+        Retries up to ``settings.max_retries`` times, raising
+        :class:`DataFetchError` once every attempt has failed.
+        """
+        attempts = max(self.settings.max_retries, 1)
+        last_exc: Exception | None = None
+        for attempt in range(attempts):
+            self.rate_limiter.wait()
+            try:
+                return call()
+            except Exception as exc:
+                last_exc = exc
+                if attempt < attempts - 1:
+                    exponential_backoff_sleep(self.settings.backoff_seconds, attempt)
+        raise DataFetchError(f'{operation} failed after {attempts} attempts: {last_exc}') from last_exc
+
+    def fetch_history(
+        self,
+        tickers: list[str],
+        period: str = '2y',
+        interval: str = '1d',
+        force_refresh: bool = False,
+    ) -> dict[str, pd.DataFrame]:
+        sorted_tickers = sorted(set(tickers))
+        result: dict[str, pd.DataFrame] = {}
+        missing: list[str] = []
+
+        for ticker in sorted_tickers:
+            cache_key = f'history:{ticker}:{period}:{interval}'
+            if not force_refresh:
+                cached = self.cache.get(cache_key)
+                if cached is not None:
+                    result[ticker] = cached
+                    continue
+            missing.append(ticker)
+
+        if missing:
+            batch_data = self._download_batch(missing, period=period, interval=interval)
+            ttl_seconds = self.settings.cache_ttl_hours * 3600
+            for ticker, df in batch_data.items():
+                if df.empty:
+                    continue
+                result[ticker] = df
+                self.cache.set(
+                    f'history:{ticker}:{period}:{interval}',
+                    df,
+                    ttl_seconds=ttl_seconds,
+                )
+
+        return result
+
+    def _download_batch(
+        self, tickers: list[str], period: str = '2y', interval: str = '1d'
+    ) -> dict[str, pd.DataFrame]:
+        if not tickers:
+            return {}
+
+        def download():
+            return yf.download(
+                tickers=tickers,
+                period=period,
+                interval=interval,
+                auto_adjust=False,
+                progress=False,
+                threads=True,
+                group_by='ticker',
+            )
+
+        try:
+            data = self._with_retry(download, operation='download history')
+        except DataFetchError as exc:
+            self.logger.warning('History batch of %s symbols failed: %s', len(tickers), exc)
+            return {}
+
+        output: dict[str, pd.DataFrame] = {}
+
+        if isinstance(data.columns, pd.MultiIndex):
+            for ticker in tickers:
+                if ticker not in data.columns.get_level_values(0):
+                    output[ticker] = pd.DataFrame()
+                    continue
+                df = data[ticker].copy().dropna(how='all')
+                output[ticker] = df
+        else:
+            # yfinance returns flat (non-MultiIndex) columns for a single ticker.
+            ticker = tickers[0]
+            output[ticker] = data.copy().dropna(how='all')
+
+        return output
+
+    def fetch_fundamentals(
+        self, tickers: list[str], force_refresh: bool = False
+    ) -> dict[str, Fundamentals]:
+        output: dict[str, Fundamentals] = {}
+
+        unique_tickers = sorted(set(tickers))
+        to_fetch: list[str] = []
+        for ticker in unique_tickers:
+            if not force_refresh:
+                cached = self.cache.get(f'fundamentals:{ticker}')
+                if cached is not None:
+                    output[ticker] = Fundamentals(**cached)
+                    continue
+            to_fetch.append(ticker)
+
+        if not to_fetch:
+            return output
+
+        workers = max(1, min(self.settings.fundamentals_max_workers, len(to_fetch)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            results = executor.map(self._fetch_one_fundamental, to_fetch)
+
+        for entry in results:
+            if entry is not None:
+                output[entry.ticker] = entry
+
+        return output
+
+    def _fetch_one_fundamental(self, ticker: str) -> Fundamentals | None:
+        try:
+            info = self._with_retry(
+                lambda t=ticker: yf.Ticker(t).info,
+                operation=f'fetch fundamentals {ticker}',
+            )
+        except DataFetchError as exc:
+            self.logger.warning('Skipping fundamentals for %s: %s', ticker, exc)
+            return None
+
+        info = info or {}
+        entry = Fundamentals(
+            ticker=ticker,
+            company_name=info.get('shortName') or info.get('longName'),
+            market_cap=_coerce_number(info.get('marketCap')),
+            pe_ratio=_coerce_number(info.get('trailingPE')),
+            revenue_growth=_coerce_number(info.get('revenueGrowth')),
+            exchange=info.get('exchange'),
+        )
+
+        self.cache.set(f'fundamentals:{ticker}', entry.__dict__, ttl_seconds=self.settings.cache_ttl_hours * 3600)
+        return entry
+
+    def filter_allowed_exchanges(
+        self, fundamentals: dict[str, Fundamentals]
+    ) -> tuple[list[str], list[str]]:
+        included: list[str] = []
+        excluded: list[str] = []
+
+        for ticker, item in fundamentals.items():
+            if not item.exchange:
+                # Unknown exchange: keep the symbol rather than drop it.
+                included.append(ticker)
+                continue
+
+            if item.exchange in ALLOWED_EXCHANGES:
+                included.append(ticker)
+            else:
+                excluded.append(ticker)
+
+        if excluded:
+            self.logger.warning('Excluded %s symbols outside allowed exchanges', len(excluded))
+
+        return included, excluded
+
+
+def _coerce_number(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number):
+        return None
+    return number

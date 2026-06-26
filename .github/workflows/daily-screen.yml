@@ -1,0 +1,59 @@
+name: Daily Screen
+
+on:
+  # Manual-only for now. Add a `schedule:` block here to automate, e.g.:
+  #   schedule:
+  #     - cron: '30 22 * * 1-5'   # 22:30 UTC on weekdays, after the US close
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-screen
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Cache screener data
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: screener-cache-${{ github.run_id }}
+          restore-keys: |
+            screener-cache-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate snapshot
+        env:
+          # Screen the entire S&P 500 so the displayed top picks are the true
+          # leaders. Set SCREENER_SNAPSHOT_SYMBOLS to a positive number to cap
+          # the universe if Yahoo throttling becomes a problem.
+          SCREENER_SNAPSHOT_SYMBOLS: '0'
+          SCREENER_SNAPSHOT_LIMIT: '20'
+        run: python scripts/generate_snapshot.py
+
+      - name: Commit updated README
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "No README changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "chore: daily screener snapshot [skip ci]"
+          git push
