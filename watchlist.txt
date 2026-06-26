@@ -1,0 +1,13 @@
+# Watchlist (safe to commit) -- tickers you follow, no positions or sizes.
+#
+# Names here are screened for high-conviction entry setups alongside the
+# S&P 500 in the "Recommended Adds" section, and can be charted. There are
+# no share counts or cost basis here -- it is purely a list of candidates.
+#
+# Format: one ticker per line. "#" starts a comment. A sleeve tag is optional
+# and only matters once a name becomes a real position (track it in
+# portfolio.txt then).
+
+AMD
+AVGO
+LLY

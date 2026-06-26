@@ -32,6 +32,14 @@ class Settings:
     core_score_threshold: float = 0.60
     max_position_weight: float = 0.10
 
+    # Risk-based position sizing and add recommendations
+    risk_per_trade: float = 0.01
+    core_allocation_min: float = 0.60
+    core_allocation_max: float = 0.70
+    max_individual_stocks: int = 10
+    rec_min_confidence: float = 85.0
+    rec_min_reward_risk: float = 2.5
+
 
 def load_settings() -> Settings:
     """Build :class:`Settings`, overriding defaults from ``SCREENER_*`` env vars."""
@@ -56,6 +64,12 @@ def load_settings() -> Settings:
         ('core_allocation', 'CORE_ALLOCATION', float),
         ('core_score_threshold', 'CORE_SCORE_THRESHOLD', float),
         ('max_position_weight', 'MAX_POSITION_WEIGHT', float),
+        ('risk_per_trade', 'RISK_PER_TRADE', float),
+        ('core_allocation_min', 'CORE_ALLOCATION_MIN', float),
+        ('core_allocation_max', 'CORE_ALLOCATION_MAX', float),
+        ('max_individual_stocks', 'MAX_INDIVIDUAL_STOCKS', int),
+        ('rec_min_confidence', 'REC_MIN_CONFIDENCE', float),
+        ('rec_min_reward_risk', 'REC_MIN_REWARD_RISK', float),
     )
 
     values = {}

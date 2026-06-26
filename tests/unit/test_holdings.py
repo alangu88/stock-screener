@@ -6,11 +6,18 @@ import pandas as pd
 from src.config import Settings
 from src.screener.holdings import (
     DEFAULT_ACCOUNT,
+    SATELLITE,
     PositionEntry,
     account_groups,
+    allocation_summary,
     build_monitor,
     concentration_summary,
+    count_individual_stocks,
+    export_manifest,
     has_accounts,
+    merge_holdings,
+    parse_account_value,
+    parse_portfolio,
     parse_positions,
 )
 
@@ -227,5 +234,160 @@ def test_account_groups_split_and_order():
     assert [label for label, _ in groups] == ['Taxable', 'Roth IRA', DEFAULT_ACCOUNT]
     taxable = dict(groups)['Taxable']
     assert list(taxable['Ticker']) == ['A', 'C']
+
+
+def test_parse_portfolio_sleeve_tags_and_default():
+    text = '[Taxable]\nVTI, core\nFSELX, satellite\nNVDA\n'
+    entries = parse_portfolio(text)
+    by_ticker = {e.ticker: e for e in entries}
+    assert by_ticker['VTI'].sleeve == 'core'
+    assert by_ticker['VTI'].account == 'Taxable'
+    assert by_ticker['FSELX'].sleeve == 'satellite'
+    assert by_ticker['NVDA'].sleeve == SATELLITE  # default
+    assert all(e.shares is None and e.entry_price is None for e in entries)
+
+
+def test_parse_portfolio_sleeve_token_before_ticker_and_case_insensitive():
+    entries = parse_portfolio('Core VTI\nSATELLITE fselx\n')
+    by_ticker = {e.ticker: e for e in entries}
+    assert by_ticker['VTI'].sleeve == 'core'
+    assert by_ticker['FSELX'].sleeve == 'satellite'
+
+
+def test_parse_portfolio_dedupes_per_account_keeps_first():
+    entries = parse_portfolio('[Taxable]\nVTI, core\nVTI, satellite\n[Roth IRA]\nVTI, core\n')
+    taxable = [e for e in entries if e.account == 'Taxable']
+    assert len(taxable) == 1
+    assert taxable[0].sleeve == 'core'
+    # Same ticker under a different account is kept.
+    assert any(e.account == 'Roth IRA' and e.ticker == 'VTI' for e in entries)
+
+
+def test_parse_account_value_directive_forms():
+    assert parse_account_value('account_value = 100000') == 100000.0
+    assert parse_account_value('ACCOUNT_VALUE: $95,000') == 95000.0
+    assert parse_account_value('VTI, 240, 10') is None
+    assert parse_account_value('# account_value = 5') is None
+
+
+def test_parse_positions_skips_account_value_directive():
+    entries = parse_positions('account_value = 100000\nAAPL, 150, 10\n')
+    assert [e.ticker for e in entries] == ['AAPL']
+
+
+def test_parse_account_value_sums_plus_separated_terms():
+    assert parse_account_value('account_value = 2310.60 + 5269.23') == 7579.83
+    assert parse_account_value('account_value = $1,000 + 2,000 + 500') == 3500.0
+
+
+def test_account_value_line_never_becomes_a_ticker():
+    # Even a malformed value must be treated as the directive, not a ticker.
+    entries = parse_positions('account_value = 10 +\nAAPL\n')
+    tickers = [e.ticker for e in entries]
+    assert 'ACCOUNT_VALUE' not in tickers
+    assert tickers == ['AAPL']
+
+
+def test_merge_holdings_joins_sleeve_and_sizes():
+    portfolio = [
+        PositionEntry('VTI', account='Taxable', sleeve='core'),
+        PositionEntry('FSELX', account='Taxable', sleeve='satellite'),
+    ]
+    positions = [
+        PositionEntry('VTI', entry_price=240.0, shares=10.0, account='Taxable'),
+    ]
+    merged = merge_holdings(portfolio, positions)
+    by_ticker = {e.ticker: e for e in merged}
+    assert by_ticker['VTI'].sleeve == 'core'
+    assert by_ticker['VTI'].shares == 10.0
+    assert by_ticker['VTI'].entry_price == 240.0
+    # In portfolio but no size -> sleeve kept, sizes None.
+    assert by_ticker['FSELX'].sleeve == 'satellite'
+    assert by_ticker['FSELX'].shares is None
+
+
+def test_merge_holdings_appends_position_only_with_default_sleeve():
+    portfolio = [PositionEntry('VTI', account='Taxable', sleeve='core')]
+    positions = [
+        PositionEntry('VTI', entry_price=240.0, shares=10.0, account='Taxable'),
+        PositionEntry('NVDA', entry_price=95.0, shares=5.0, account='Taxable'),
+    ]
+    merged = merge_holdings(portfolio, positions)
+    assert [e.ticker for e in merged] == ['VTI', 'NVDA']  # portfolio order first
+    nvda = merged[1]
+    assert nvda.sleeve == SATELLITE
+    assert nvda.shares == 5.0
+
+
+def test_export_manifest_round_trips_without_sizes():
+    entries = [
+        PositionEntry('VTI', entry_price=240.0, shares=10.0, account='Taxable', sleeve='core'),
+        PositionEntry('FSELX', entry_price=30.5, shares=200.0, account='Taxable', sleeve='satellite'),
+        PositionEntry('NVDA', entry_price=95.0, shares=5.0, account='Roth IRA', sleeve='satellite'),
+    ]
+    text = export_manifest(entries)
+    # No private sizing should leak into the committed manifest.
+    assert '240' not in text
+    assert '200' not in text
+    assert '[Taxable]' in text and '[Roth IRA]' in text
+    # Re-parsing yields the same tickers, accounts, and sleeves.
+    reparsed = {(e.account, e.ticker): e.sleeve for e in parse_portfolio(text)}
+    assert reparsed[('Taxable', 'VTI')] == 'core'
+    assert reparsed[('Taxable', 'FSELX')] == 'satellite'
+    assert reparsed[('Roth IRA', 'NVDA')] == 'satellite'
+
+
+def _sleeved_monitor(rows: list[tuple[str, str, float]]) -> pd.DataFrame:
+    """Build a monitor from (ticker, sleeve, shares) at a flat $100 price."""
+    flat = [100.0] * 260
+    entries = [
+        PositionEntry(t, entry_price=100.0, shares=sh, sleeve=sleeve)
+        for t, sleeve, sh in rows
+    ]
+    history = {t: _history(flat) for t, _, _ in rows}
+    return build_monitor(entries, history, SETTINGS)
+
+
+def test_build_monitor_carries_sleeve_column():
+    monitor = _sleeved_monitor([('VTI', 'core', 10.0), ('NVDA', 'satellite', 5.0)])
+    by_ticker = monitor.set_index('Ticker')
+    assert by_ticker.loc['VTI', 'Sleeve'] == 'core'
+    assert by_ticker.loc['NVDA', 'Sleeve'] == 'satellite'
+
+
+def test_allocation_summary_on_target():
+    # Core $6,500 of $10,000 = 65%, inside the 60-70% band.
+    monitor = _sleeved_monitor([('VTI', 'core', 65.0), ('NVDA', 'satellite', 35.0)])
+    stats = allocation_summary(monitor, 0.60, 0.70)
+    assert stats is not None
+    assert round(stats.core_pct, 4) == 0.65
+    assert round(stats.satellite_pct, 4) == 0.35
+    assert stats.within_band is True
+    assert stats.label == 'On target'
+
+
+def test_allocation_summary_core_light_and_heavy():
+    light = allocation_summary(_sleeved_monitor([('VTI', 'core', 40.0), ('NVDA', 'satellite', 60.0)]), 0.60, 0.70)
+    assert light is not None and light.label == 'Core light' and light.within_band is False
+    heavy = allocation_summary(_sleeved_monitor([('VTI', 'core', 90.0), ('NVDA', 'satellite', 10.0)]), 0.60, 0.70)
+    assert heavy is not None and heavy.label == 'Core heavy' and heavy.within_band is False
+
+
+def test_allocation_summary_none_without_sized_positions():
+    flat = [100.0] * 260
+    monitor = build_monitor([PositionEntry('VTI', sleeve='core')], {'VTI': _history(flat)}, SETTINGS)
+    assert allocation_summary(monitor, 0.60, 0.70) is None
+
+
+def test_count_individual_stocks_excludes_core_and_etfs():
+    monitor = _sleeved_monitor([
+        ('VTI', 'core', 10.0),       # core -> excluded
+        ('FSELX', 'satellite', 5.0),  # satellite ETF -> excluded via etf set
+        ('NVDA', 'satellite', 5.0),   # individual stock -> counts
+        ('AAPL', 'satellite', 5.0),   # individual stock -> counts
+    ])
+    assert count_individual_stocks(monitor, etf_tickers={'FSELX', 'VTI'}) == 2
+
+
 
 

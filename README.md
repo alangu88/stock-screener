@@ -277,6 +277,54 @@ For development (tests + linting), install the dev extras instead:
 pip install -r requirements-dev.txt
 ```
 
+## Position Management & Daily Report
+
+The app doubles as a personal position-management tool built around a
+privacy-preserving two-file model:
+
+| File | Committed? | Contents |
+| --- | --- | --- |
+| `portfolio.txt` | Yes | Composition only — `[Account]` sections with `TICKER, core|satellite` lines. No sizes. |
+| `positions.txt` | **No** (git-ignored) | Private sizes — `[Account]` sections with `TICKER, cost_basis, shares` lines, plus an `account_value = NNNNN` directive. Copy `positions.example.txt` to start. |
+| `watchlist.txt` | Yes | Tickers you follow but do not hold. |
+| `reports/daily_report.md` | **No** (git-ignored) | Latest generated report (overwritten each run). |
+
+The app **merges** the two files at runtime: sleeve and membership come from the
+committed `portfolio.txt`, while share counts and cost basis stay in the private
+`positions.txt`, so your real sizes never get committed. The **Publish
+composition** button regenerates `portfolio.txt` from your current holdings
+(tickers + sleeve only). The `account_value` directive supports `+`-separated
+sums, e.g. `account_value = 2310.60 + 5269.23`.
+
+Position sizing uses **1% account risk per trade** (`SCREENER_RISK_PER_TRADE`),
+capped by the per-name weight limit. Core allocation targets **60–70%**
+(`SCREENER_CORE_ALLOCATION_MIN` / `_MAX`), and the app flags when you exceed the
+**individual-stock cap** (`SCREENER_MAX_INDIVIDUAL_STOCKS`, ETFs excluded).
+Recommended Adds uses tight gates by default (confidence ≥ 85, R/R ≥ 2.5).
+
+### Daily report
+
+Generate a local Markdown snapshot (positions status, add sizes, recommended
+adds, allocation, risk, and concentration) without launching the app:
+
+```bash
+python scripts/daily_report.py
+```
+
+It writes a single file, `reports/daily_report.md`, **overwritten on every run**
+(no history is kept). Network failures are caught and turned into an
+"unavailable" notice rather than crashing.
+
+To run it automatically each day, schedule it with **Windows Task Scheduler**
+(Create Basic Task → Daily → Start a program):
+
+- Program/script: `C:\path\to\stock-screener\.venv\Scripts\python.exe`
+- Arguments: `scripts\daily_report.py`
+- Start in: `C:\path\to\stock-screener`
+
+On macOS/Linux, use a `cron` entry such as
+`0 7 * * * cd /path/to/stock-screener && .venv/bin/python scripts/daily_report.py`.
+
 ## Configuration
 
 All settings have sensible defaults and can be overridden with `SCREENER_*`

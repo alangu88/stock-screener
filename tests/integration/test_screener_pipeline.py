@@ -74,3 +74,42 @@ def test_high_confidence_gate_filters_everything():
     out = engine.screen(universe, cfg)
 
     assert out.empty
+
+
+def test_analyze_returns_row_per_ticker_with_actionable_flag():
+    engine = ScreenerEngine(client=FakeClient())
+    universe = UniverseResult(tickers=['AAA', 'BBB'], companies={'AAA': 'A Co', 'BBB': 'B Co'})
+    cfg = FilterConfig(min_confidence=45.0, min_reward_risk=1.5, min_avg_volume=100)
+
+    out = engine.analyze(universe, cfg)
+
+    assert list(out['Ticker']) == ['AAA', 'BBB']
+    assert 'Actionable' in out.columns
+    # The breakout construction clears the loose gates for both names.
+    assert out['Actionable'].all()
+    assert {'Entry', 'Stop', 'Target', 'R/R', 'Confidence'}.issubset(out.columns)
+
+
+def test_analyze_includes_non_actionable_rows():
+    engine = ScreenerEngine(client=FakeClient())
+    universe = UniverseResult(tickers=['AAA'], companies={'AAA': 'A Co'})
+    # A gate so tight nothing is actionable -- but analyze still returns the row.
+    cfg = FilterConfig(min_confidence=99.0, min_reward_risk=1.5, min_avg_volume=100)
+
+    out = engine.analyze(universe, cfg)
+
+    assert list(out['Ticker']) == ['AAA']
+    assert out['Actionable'].tolist() == [False]
+    # Plan levels are still populated for the held/analysed name.
+    assert out.iloc[0]['Entry'] is not None
+
+
+def test_analyze_empty_universe_returns_empty_frame():
+    engine = ScreenerEngine(client=FakeClient())
+    cfg = FilterConfig(min_confidence=45.0, min_reward_risk=1.5, min_avg_volume=100)
+
+    out = engine.analyze(UniverseResult(tickers=[], companies={}), cfg)
+
+    assert out.empty
+    assert 'Actionable' in out.columns
+

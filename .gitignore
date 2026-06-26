@@ -219,3 +219,6 @@ __marimo__/
 
 # Personal positions (keep real holdings private)
 positions.txt
+
+# Locally generated daily reports (may reference private sizing)
+reports/

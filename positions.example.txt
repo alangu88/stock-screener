@@ -1,29 +1,31 @@
-# Your current positions.
+# Your private position SIZES (cost basis + shares). KEEP THIS PRIVATE.
 #
 # Copy this file to "positions.txt" (which is git-ignored, so your real
-# holdings stay private) and replace the lines below with your own tickers.
+# holdings stay private) and replace the lines below with your own numbers.
 # The app loads positions.txt automatically on startup; use the in-app
 # "Save to positions.txt" button to persist edits made in the UI.
 #
-# One ticker per line. Optionally add an entry price and share count,
-# separated by commas or spaces. "#" starts a comment. Examples:
+# Which tickers you hold and how they're classified (core/satellite) lives in
+# the committable "portfolio.txt". THIS file only adds the private sizing on
+# top of it, joined by account + ticker.
 #
-#   TICKER                 -> monitor moving averages only
-#   TICKER, entry_price    -> also shows unrealized P&L %
-#   TICKER, entry, shares  -> also shows value, P&L $, and portfolio weight
-#
-# Group positions by account with a [Section] header. Everything below a
-# header belongs to that account until the next one, so you get a per-account
-# value, P&L, and concentration breakdown (e.g. taxable vs. Roth IRA).
+# One ticker per line: "TICKER, cost_basis, shares". "#" starts a comment.
+# Group by account with a [Section] header (e.g. taxable vs. Roth IRA).
 #
 # Bought a stock in several lots? List it once per buy within the same account
 # (TICKER, price, shares). Shares are summed and the entry price becomes the
 # share-weighted average cost basis.
+#
+# Set your total account value for risk-based add sizing (1% risk per trade):
+account_value = 100000
 
 [Taxable]
+VTI, 240.00, 120
+FSELX, 30.50, 200
 AAPL, 150, 10
 AAPL, 170, 20        # -> 30 sh @ 163.33 average cost
-MSFT, 410.50
 
 [Roth IRA]
+VTI, 240.00, 40
 NVDA, 95.20, 100
+

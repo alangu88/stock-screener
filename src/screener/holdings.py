@@ -35,9 +35,20 @@ HHI_MODERATE = 0.25
 # Bucket label for positions listed before (or without) any ``[Account]`` header.
 DEFAULT_ACCOUNT = 'Unassigned'
 
+# Sleeve tags. Sleeve is ALWAYS the owner's explicit choice, never auto-derived
+# from asset type -- e.g. a sector ETF like FSELX is a Satellite, not Core.
+CORE = 'core'
+SATELLITE = 'satellite'
+SLEEVES = (CORE, SATELLITE)
+
+# Directive key (in the private positions file) carrying total account value for
+# risk-based sizing, e.g. ``account_value = 100000``.
+ACCOUNT_VALUE_KEY = 'account_value'
+
 MONITOR_COLUMNS = (
     'Ticker',
     'Account',
+    'Sleeve',
     'Price',
     'EMA20',
     'SMA50',
@@ -63,6 +74,7 @@ class PositionEntry:
     entry_price: float | None = None
     shares: float | None = None
     account: str | None = None
+    sleeve: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +87,19 @@ class ConcentrationStats:
     hhi: float               # Herfindahl-Hirschman Index, sum of squared weights
     effective_positions: float  # 1 / HHI: equal-weight-equivalent holding count
     label: str               # 'Diversified' / 'Moderately concentrated' / 'Concentrated'
+
+
+@dataclass(frozen=True)
+class AllocationStats:
+    core_value: float        # market value of core-sleeve holdings
+    satellite_value: float   # market value of satellite-sleeve holdings
+    total_value: float       # core + satellite
+    core_pct: float          # core_value / total_value (0..1)
+    satellite_pct: float     # satellite_value / total_value (0..1)
+    target_min: float        # lower bound of the core target band (0..1)
+    target_max: float        # upper bound of the core target band (0..1)
+    within_band: bool        # True when target_min <= core_pct <= target_max
+    label: str               # 'On target' / 'Core light' / 'Core heavy'
 
 
 
@@ -113,6 +138,8 @@ def parse_positions(text: str) -> list[PositionEntry]:
             continue
         if line.startswith('[') and line.endswith(']'):
             current_account = line[1:-1].strip() or None
+            continue
+        if _is_account_value_line(line):
             continue
         parts = [p for p in line.replace(',', ' ').replace('\t', ' ').split() if p]
         symbol = normalize_ticker(parts[0])
@@ -168,6 +195,172 @@ def _combine_lots(
     return avg_cost, total_shares
 
 
+def parse_portfolio(text: str) -> list[PositionEntry]:
+    """Parse the committed composition file (tickers + sleeve, no sizes).
+
+    One ticker per line, optionally followed by a sleeve tag (``core`` or
+    ``satellite``); the tag may appear before or after the ticker and is
+    matched case-insensitively. ``#`` starts a comment and ``[Account Name]``
+    opens a section, exactly like :func:`parse_positions`. Lines carry **no**
+    share counts or prices -- this file is safe to commit. Example::
+
+        [Taxable]
+        VTI, core
+        VXUS, core
+        FSELX, satellite     # sector ETF is a satellite, not core
+
+    The sleeve defaults to ``satellite`` when omitted. Duplicate tickers within
+    an account keep the first occurrence; the same ticker may appear under
+    different accounts.
+    """
+    entries: list[PositionEntry] = []
+    seen: set[tuple[str | None, str]] = set()
+    current_account: str | None = None
+    for raw in text.splitlines():
+        line = raw.split('#', 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith('[') and line.endswith(']'):
+            current_account = line[1:-1].strip() or None
+            continue
+        tokens = [p for p in line.replace(',', ' ').replace('\t', ' ').split() if p]
+        sleeve = SATELLITE
+        symbol = ''
+        for token in tokens:
+            low = token.lower()
+            if low in SLEEVES:
+                sleeve = low
+            elif not symbol:
+                symbol = normalize_ticker(token)
+        if not symbol:
+            continue
+        key = (current_account, symbol)
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(PositionEntry(symbol, account=current_account, sleeve=sleeve))
+    return entries
+
+
+def parse_account_value(text: str) -> float | None:
+    """Return the ``account_value`` directive from a positions file, if present.
+
+    Recognizes a line like ``account_value = 100000`` or ``account_value: 95,000``
+    (``$`` and thousands separators are tolerated). Returns ``None`` when absent
+    or unparseable.
+    """
+    for raw in text.splitlines():
+        line = raw.split('#', 1)[0].strip()
+        value = _account_value_directive(line)
+        if value is not None:
+            return value
+    return None
+
+
+def merge_holdings(
+    portfolio: list[PositionEntry],
+    positions: list[PositionEntry],
+) -> list[PositionEntry]:
+    """Combine committed composition with private sizing into full holdings.
+
+    Sleeve and membership come from ``portfolio`` (the committed file); cost
+    basis and shares come from ``positions`` (the private file), joined on
+    ``(account, ticker)``. Tickers present only in ``positions`` (held but not
+    yet published) are appended with a default ``satellite`` sleeve.
+    """
+    sizes = {(p.account, p.ticker): p for p in positions}
+    merged: list[PositionEntry] = []
+    used: set[tuple[str | None, str]] = set()
+    for entry in portfolio:
+        key = (entry.account, entry.ticker)
+        used.add(key)
+        sized = sizes.get(key)
+        merged.append(
+            PositionEntry(
+                ticker=entry.ticker,
+                entry_price=sized.entry_price if sized else None,
+                shares=sized.shares if sized else None,
+                account=entry.account,
+                sleeve=entry.sleeve or SATELLITE,
+            )
+        )
+    for entry in positions:
+        key = (entry.account, entry.ticker)
+        if key in used:
+            continue
+        used.add(key)
+        merged.append(
+            PositionEntry(
+                ticker=entry.ticker,
+                entry_price=entry.entry_price,
+                shares=entry.shares,
+                account=entry.account,
+                sleeve=entry.sleeve or SATELLITE,
+            )
+        )
+    return merged
+
+
+def export_manifest(entries: list[PositionEntry]) -> str:
+    """Render holdings as committable composition text (tickers + sleeve only).
+
+    Sizes (shares, cost basis) are intentionally dropped so the result is safe
+    to commit. Output mirrors the :func:`parse_portfolio` format, grouped by
+    account in first-seen order.
+    """
+    grouped: dict[str | None, list[PositionEntry]] = {}
+    order: list[str | None] = []
+    for entry in entries:
+        if entry.account not in grouped:
+            grouped[entry.account] = []
+            order.append(entry.account)
+        grouped[entry.account].append(entry)
+
+    out = [
+        '# Portfolio composition (safe to commit) -- tickers + sleeve only, no sizes.',
+        '# Auto-generated from your positions; edit and re-publish from the app.',
+    ]
+    for account in order:
+        out.append('')
+        if account:
+            out.append(f'[{account}]')
+        for entry in grouped[account]:
+            out.append(f'{entry.ticker}, {entry.sleeve or SATELLITE}')
+    return '\n'.join(out) + '\n'
+
+
+def _is_account_value_line(line: str) -> bool:
+    """True when a line is an ``account_value`` directive (by key), valid or not.
+
+    Detecting by key -- not by a parseable value -- means a malformed value never
+    leaks through and gets mistaken for a ticker named ``ACCOUNT_VALUE``.
+    """
+    if not line:
+        return False
+    low = line.lower()
+    if not low.startswith(ACCOUNT_VALUE_KEY):
+        return False
+    rest = line[len(ACCOUNT_VALUE_KEY):].lstrip()
+    return rest[:1] in ('=', ':')
+
+
+def _account_value_directive(line: str) -> float | None:
+    """Parse an ``account_value = N`` directive line, else ``None``.
+
+    The value may be a single number or a sum of ``+``-separated numbers (handy
+    for adding several account balances, e.g. ``account_value = 2310 + 5269``).
+    ``$`` and thousands separators are tolerated. Returns ``None`` if the line is
+    not a directive or no term parses.
+    """
+    if not _is_account_value_line(line):
+        return None
+    rest = line[len(ACCOUNT_VALUE_KEY):].lstrip()[1:].strip()
+    terms = [_to_float(term) for term in rest.split('+')]
+    valid = [t for t in terms if t is not None]
+    if not valid:
+        return None
+    return sum(valid)
+
 
 def build_monitor(
     entries: list[PositionEntry],
@@ -191,6 +384,7 @@ def _monitor_row(
     row: dict = {col: None for col in MONITOR_COLUMNS}
     row['Ticker'] = entry.ticker
     row['Account'] = entry.account
+    row['Sleeve'] = entry.sleeve
     row['Entry'] = entry.entry_price
     row['Shares'] = entry.shares
 
@@ -284,6 +478,73 @@ def _concentration_label(hhi: float) -> str:
     if hhi < HHI_MODERATE:
         return 'Moderately concentrated'
     return 'Concentrated'
+
+
+def allocation_summary(
+    monitor: pd.DataFrame,
+    core_min: float,
+    core_max: float,
+) -> AllocationStats | None:
+    """Summarize Core vs Satellite allocation against the target band.
+
+    Core value is the sum of ``Value`` for rows tagged ``core`` in the
+    ``Sleeve`` column; everything else sized counts as Satellite. Returns
+    ``None`` when there are no sized positions.
+    """
+    if 'Sleeve' not in monitor.columns:
+        return None
+    sized = monitor.loc[monitor['Value'].notna(), ['Sleeve', 'Value']].copy()
+    sized = sized[sized['Value'] > 0]
+    if sized.empty:
+        return None
+
+    total_value = float(sized['Value'].sum())
+    is_core = sized['Sleeve'].astype('string').str.lower() == CORE
+    core_value = float(sized.loc[is_core, 'Value'].sum())
+    satellite_value = total_value - core_value
+    core_pct = core_value / total_value
+    satellite_pct = satellite_value / total_value
+
+    if core_pct < core_min:
+        label = 'Core light'
+    elif core_pct > core_max:
+        label = 'Core heavy'
+    else:
+        label = 'On target'
+
+    return AllocationStats(
+        core_value=core_value,
+        satellite_value=satellite_value,
+        total_value=total_value,
+        core_pct=core_pct,
+        satellite_pct=satellite_pct,
+        target_min=core_min,
+        target_max=core_max,
+        within_band=core_min <= core_pct <= core_max,
+        label=label,
+    )
+
+
+def count_individual_stocks(monitor: pd.DataFrame, etf_tickers: set[str]) -> int:
+    """Count single-company Satellite holdings (ETFs excluded).
+
+    Used to police the diversification cap on individual names. Tickers present
+    in ``etf_tickers`` are treated as funds and excluded from the count; Core
+    holdings (typically broad index funds) are excluded too.
+    """
+    if 'Sleeve' not in monitor.columns:
+        sleeves = pd.Series([None] * len(monitor), index=monitor.index)
+    else:
+        sleeves = monitor['Sleeve'].astype('string').str.lower()
+    etfs = {t.upper() for t in etf_tickers}
+    count = 0
+    for ticker, sleeve in zip(monitor['Ticker'], sleeves, strict=False):
+        if sleeve == CORE:
+            continue
+        if str(ticker).upper() in etfs:
+            continue
+        count += 1
+    return count
 
 
 def _close_series(df: pd.DataFrame | None) -> pd.Series | None:

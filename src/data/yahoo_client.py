@@ -26,6 +26,7 @@ class Fundamentals:
     pe_ratio: float | None
     revenue_growth: float | None
     exchange: str | None
+    quote_type: str | None = None
 
 
 class YahooFinanceClient:
@@ -173,6 +174,7 @@ class YahooFinanceClient:
             pe_ratio=_coerce_number(info.get('trailingPE')),
             revenue_growth=_coerce_number(info.get('revenueGrowth')),
             exchange=info.get('exchange'),
+            quote_type=info.get('quoteType'),
         )
 
         self.cache.set(f'fundamentals:{ticker}', entry.__dict__, ttl_seconds=self.settings.cache_ttl_hours * 3600)
