@@ -1,0 +1,29 @@
+# Your current positions.
+#
+# Copy this file to "positions.txt" (which is git-ignored, so your real
+# holdings stay private) and replace the lines below with your own tickers.
+# The app loads positions.txt automatically on startup; use the in-app
+# "Save to positions.txt" button to persist edits made in the UI.
+#
+# One ticker per line. Optionally add an entry price and share count,
+# separated by commas or spaces. "#" starts a comment. Examples:
+#
+#   TICKER                 -> monitor moving averages only
+#   TICKER, entry_price    -> also shows unrealized P&L %
+#   TICKER, entry, shares  -> also shows value, P&L $, and portfolio weight
+#
+# Group positions by account with a [Section] header. Everything below a
+# header belongs to that account until the next one, so you get a per-account
+# value, P&L, and concentration breakdown (e.g. taxable vs. Roth IRA).
+#
+# Bought a stock in several lots? List it once per buy within the same account
+# (TICKER, price, shares). Shares are summed and the entry price becomes the
+# share-weighted average cost basis.
+
+[Taxable]
+AAPL, 150, 10
+AAPL, 170, 20        # -> 30 sh @ 163.33 average cost
+MSFT, 410.50
+
+[Roth IRA]
+NVDA, 95.20, 100

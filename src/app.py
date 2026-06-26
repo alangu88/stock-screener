@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -12,7 +13,7 @@ from plotly.subplots import make_subplots
 from src.analysis.indicators import compute_indicators
 from src.config import Settings, load_settings
 from src.data.cache import SQLiteCache
-from src.data.universe import load_sp500_universe
+from src.data.universe import UniverseResult, load_sp500_universe
 from src.data.yahoo_client import YahooFinanceClient
 from src.export.csv_export import to_csv_bytes
 from src.screener.backtest import (
@@ -24,6 +25,13 @@ from src.screener.backtest import (
     trades_to_frame,
 )
 from src.screener.engine import FilterConfig, ScreenerEngine
+from src.screener.holdings import (
+    account_groups,
+    build_monitor,
+    concentration_summary,
+    has_accounts,
+    parse_positions,
+)
 from src.screener.portfolio import PortfolioConfig, sleeve_summary
 from src.screener.result import SORTABLE_COLUMNS
 from src.screener.setups import BREAKOUT, CONTRACTION, PULLBACK
@@ -429,6 +437,169 @@ def _format_stats_df(df: pd.DataFrame) -> pd.DataFrame:
     return _apply_formatters(df, _BACKTEST_STATS_FORMATTERS)
 
 
+_MONITOR_FORMATTERS = {
+    'Price': _money,
+    'EMA20': _money,
+    'SMA50': _money,
+    'SMA200': _money,
+    '% vs EMA20': _percent,
+    '% vs SMA50': _percent,
+    '% vs SMA200': _percent,
+    'Entry': _money,
+    'Unreal P&L %': _percent,
+    'Shares': _integer,
+    'Value': _money,
+    'Weight %': _percent,
+    'Unreal P&L $': _money,
+}
+
+_POSITIONS_PLACEHOLDER = (
+    '# One ticker per line. Optionally add entry price and shares.\n'
+    '# Format: TICKER, entry_price, shares   (price and shares optional)\n'
+    '# Group positions by account with a [Section] header.\n'
+    '# Repeat a ticker per lot to average the cost basis.\n'
+    '#\n'
+    '# [Taxable]\n'
+    '# AAPL, 150, 10\n'
+    '# AAPL, 170, 20\n'
+    '# MSFT, 410.50\n'
+    '#\n'
+    '# [Roth IRA]\n'
+    '# NVDA, 95.20, 100\n'
+)
+
+# Persistent, private list of the user's positions. Git-ignored so real
+# holdings never get committed; auto-loaded into the app on every start.
+POSITIONS_FILE = Path(__file__).resolve().parents[1] / 'positions.txt'
+
+
+def _initial_positions_text() -> str:
+    if POSITIONS_FILE.exists():
+        return POSITIONS_FILE.read_text(encoding='utf-8')
+    return _POSITIONS_PLACEHOLDER
+
+
+def _render_concentration(monitor: pd.DataFrame, title: str = 'Concentration') -> None:
+    stats = concentration_summary(monitor)
+    if stats is None:
+        return
+    st.markdown(f'**{title}**')
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric('Positions', stats.positions)
+    c2.metric(
+        'Largest position',
+        _percent(stats.largest_weight),
+        help=f'{stats.largest_ticker} is your biggest holding.',
+    )
+    c3.metric(f'Top {min(stats.positions, 5)} weight', _percent(stats.top_n_weight))
+    c4.metric(
+        'Effective holdings',
+        f'{stats.effective_positions:.1f}',
+        help='Equal-weight-equivalent count (1 / HHI). Far below your actual '
+             'position count means a few names dominate.',
+    )
+    message = (
+        f'{stats.label} (HHI {stats.hhi:.2f}). Largest: {stats.largest_ticker} '
+        f'at {_percent(stats.largest_weight)}; top {min(stats.positions, 5)} '
+        f'hold {_percent(stats.top_n_weight)} of the book.'
+    )
+    if stats.label == 'Diversified':
+        st.success(message)
+    elif stats.label == 'Moderately concentrated':
+        st.warning(message)
+    else:
+        st.error(message)
+
+
+def _render_accounts(monitor: pd.DataFrame) -> None:
+    """Per-account value, P&L, and concentration breakdown."""
+    st.markdown('**By account**')
+    for label, sub in account_groups(monitor):
+        held = sub['Value'].dropna()
+        with st.expander(f'{label} \u2014 {len(sub)} position(s)', expanded=True):
+            if not held.empty:
+                c1, c2 = st.columns(2)
+                c1.metric('Account value', _money(float(held.sum())))
+                pnl = sub['Unreal P&L $'].dropna()
+                c2.metric('Account P&L', _money(float(pnl.sum())) if not pnl.empty else '\u2014')
+            _render_concentration(sub)
+
+
+def _render_positions(
+    client: YahooFinanceClient,
+    settings: Settings,
+    engine: ScreenerEngine,
+    config: FilterConfig,
+) -> None:
+    st.subheader('My Positions')
+    st.caption(
+        'Track your holdings against the 20 / 50 / 200 moving averages. Add an '
+        'entry price and share count to also see unrealized P&L, position value, '
+        'and portfolio weight. Works on any symbol, including ETFs.'
+    )
+    if 'positions_input' not in st.session_state:
+        st.session_state['positions_input'] = _initial_positions_text()
+    text = st.text_area(
+        'Your positions',
+        key='positions_input',
+        height=170,
+        help='One ticker per line; optional "entry_price, shares" after each. '
+             'Save to persist your positions to positions.txt for next time.',
+    )
+    col_run, col_save = st.columns([1, 1])
+    with col_save:
+        if st.button(f'Save to {POSITIONS_FILE.name}'):
+            POSITIONS_FILE.write_text(text, encoding='utf-8')
+            st.success(f'Saved your positions to {POSITIONS_FILE.name}.')
+    with col_run:
+        analyze = st.button('Analyze Positions', type='primary')
+    if analyze:
+        entries = parse_positions(text)
+        if not entries:
+            st.session_state.pop('monitor_df', None)
+            st.warning('No tickers found. Add at least one symbol (e.g. AAPL).')
+        else:
+            tickers = [entry.ticker for entry in entries]
+            with st.spinner(f'Fetching {len(tickers)} symbol(s)...'):
+                history = client.fetch_history(tickers, period='2y')
+                monitor = build_monitor(entries, history, settings)
+                universe = UniverseResult(tickers=tickers, companies={})
+                setups = engine.screen(universe, config=config)
+            st.session_state['monitor_df'] = monitor
+            st.session_state['positions_setups'] = setups
+
+    monitor = st.session_state.get('monitor_df')
+    if monitor is None:
+        return
+
+    st.markdown('**Moving-average monitor**')
+    display_monitor = monitor if has_accounts(monitor) else monitor.drop(columns=['Account'])
+    st.dataframe(
+        _apply_formatters(display_monitor, _MONITOR_FORMATTERS),
+        width='stretch',
+        hide_index=True,
+    )
+
+    held_value = monitor['Value'].dropna()
+    if not held_value.empty:
+        c1, c2 = st.columns(2)
+        c1.metric('Portfolio value', _money(float(held_value.sum())))
+        c2.metric('Unrealized P&L', _money(float(monitor['Unreal P&L $'].dropna().sum())))
+
+    if has_accounts(monitor):
+        _render_accounts(monitor)
+        _render_concentration(monitor, title='Overall concentration')
+    else:
+        _render_concentration(monitor)
+
+    setups = st.session_state.get('positions_setups', pd.DataFrame())
+    st.markdown('**Actionable setups in your positions**')
+    if setups.empty:
+        st.info('None of your positions currently pass the active screen filters.')
+    else:
+        st.dataframe(_prepare_display_df(setups), width='stretch', hide_index=True)
+
+
 def _render_backtest(cache: SQLiteCache, engine: ScreenerEngine) -> None:
     st.subheader('Backtest (Historical Performance)')
     st.caption(
@@ -494,6 +665,7 @@ def run() -> None:
     engine.portfolio = portfolio
     _maybe_run_screen(cache, engine, config, view.run_scan)
     _render_results(client, settings, view)
+    _render_positions(client, settings, engine, config)
     _render_backtest(cache, engine)
 
 

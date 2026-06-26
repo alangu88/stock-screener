@@ -95,6 +95,15 @@ _Last updated: 2026-06-26 16:17 UTC_
 		- SMA 200
 		- RSI (separate pane with 70/30 lines)
 		- Volume
+	- Positions monitor: track your own holdings (any symbol, including ETFs)
+	  against the 20 / 50 / 200 moving averages, with trend and
+	  golden/death-cross flags. Add an entry price and share count to also see
+	  unrealized P&L, position value, and portfolio weight — group holdings by
+	  account (e.g. taxable vs. Roth IRA) for a per-account value and
+	  concentration/risk breakdown, and repeat a ticker per lot to get a
+	  share-weighted average cost basis. Your positions persist in a private,
+	  git-ignored `positions.txt` (copy `positions.example.txt` to start) that
+	  the app auto-loads on launch.
 
 ## Methodology
 
@@ -237,6 +246,7 @@ stock-screener/
 │   │   ├── trade_plan.py          # entry/stop/target from structure
 │   │   ├── ranking.py             # confidence + composite rank
 │   │   ├── portfolio.py           # Core/Satellite + risk-parity sizing
+│   │   ├── holdings.py            # positions parsing + MA/P&L monitor
 │   │   ├── backtest.py            # bar-replay simulation
 │   │   ├── result.py              # result schema
 │   │   └── engine.py              # pipeline orchestration
