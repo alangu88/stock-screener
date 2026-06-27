@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from src.analysis.features import compute_features
+from src.analysis.features import MarketFeatures, compute_features
 from src.config import Settings
 from src.data.universe import UniverseResult
 from src.data.yahoo_client import Fundamentals, YahooFinanceClient
@@ -16,9 +16,9 @@ from src.screener.ranking import (
     confidence_score,
 )
 from src.screener.result import RESULT_COLUMNS
-from src.screener.setups import AVOID, detect_setup
+from src.screener.setups import AVOID, Setup, detect_setup
 from src.screener.strategy import StrategyConfig
-from src.screener.trade_plan import build_trade_plan, management_plan
+from src.screener.trade_plan import TradePlan, build_trade_plan, management_plan
 
 HISTORY_PERIOD = '2y'
 BENCHMARK_TICKER = 'SPY'
@@ -57,12 +57,23 @@ ANALYSIS_COLUMNS: tuple[str, ...] = (
 class _TickerAnalysis:
     """Per-ticker compute output shared by ``screen`` and ``analyze``."""
 
-    features: object
-    setup: object
-    plan: object
+    features: MarketFeatures
+    setup: Setup
+    plan: TradePlan
     confidence: float
     fundamental: Fundamentals
     company_name: str
+
+
+@dataclass
+class _ScreenInputs:
+    """Shared market data fetched once before evaluating each ticker."""
+
+    fundamentals: dict[str, Fundamentals]
+    tickers: list[str]
+    history: dict[str, pd.DataFrame]
+    benchmark_close: pd.Series
+    context: MarketContext
 
 
 @dataclass
@@ -103,25 +114,15 @@ class ScreenerEngine:
         config: FilterConfig,
         force_refresh: bool = False,
     ) -> pd.DataFrame:
-        if not universe.tickers:
+        inputs = self._fetch_inputs(universe, force_refresh)
+        if inputs is None:
             return _empty_frame()
 
-        fundamentals = self.client.fetch_fundamentals(universe.tickers, force_refresh=force_refresh)
-        allowed, _ = self.client.filter_allowed_exchanges(fundamentals)
-        if not allowed:
-            return _empty_frame()
-
-        history = self.client.fetch_history(allowed, period=HISTORY_PERIOD, force_refresh=force_refresh)
-        benchmark_close = self._benchmark_close(force_refresh)
-        context = assess_market_context(benchmark_close, self.strategy)
-
-        rows = []
-        for ticker in allowed:
-            row = self._evaluate_ticker(
-                ticker, history.get(ticker), benchmark_close, context, fundamentals, universe, config
-            )
-            if row is not None:
-                rows.append(row)
+        rows = [
+            row
+            for ticker in inputs.tickers
+            if (row := self._evaluate_ticker(ticker, inputs, universe, config)) is not None
+        ]
         if not rows:
             return _empty_frame()
         portfolio = assign_portfolio(pd.DataFrame(rows), self.portfolio)
@@ -141,48 +142,39 @@ class ScreenerEngine:
         per-position analysis in the UI, where held names must always show a
         plan whether or not they are currently actionable.
         """
-        if not universe.tickers:
+        inputs = self._fetch_inputs(universe, force_refresh)
+        if inputs is None:
             return _empty_analysis_frame()
-
-        fundamentals = self.client.fetch_fundamentals(universe.tickers, force_refresh=force_refresh)
-        allowed, _ = self.client.filter_allowed_exchanges(fundamentals)
-        if not allowed:
-            return _empty_analysis_frame()
-
-        history = self.client.fetch_history(allowed, period=HISTORY_PERIOD, force_refresh=force_refresh)
-        benchmark_close = self._benchmark_close(force_refresh)
-        context = assess_market_context(benchmark_close, self.strategy)
 
         rows = []
-        for ticker in allowed:
+        for ticker in inputs.tickers:
             analysis = self._compute_ticker(
-                ticker, history.get(ticker), benchmark_close, fundamentals, universe
+                ticker, inputs.history.get(ticker), inputs.benchmark_close, inputs.fundamentals, universe
             )
-            if analysis is None:
-                continue
-            rank = composite_rank(analysis.confidence, context)
-            # Every analyzed name shows a plan: use the setup's entry plan when
-            # there is one, else fall back to management levels so held/watched
-            # names without a fresh setup still display a stop/target/R-R.
-            display_plan = analysis.plan
-            if display_plan.entry is None:
-                display_plan = management_plan(analysis.features, self.strategy)
-            row = _result_row(
-                ticker,
-                analysis.company_name,
-                analysis.fundamental,
-                analysis.features,
-                analysis.setup,
-                display_plan,
-                analysis.confidence,
-                rank,
-                context,
-            )
-            row['Actionable'] = self._passes_gates(analysis, config)
-            rows.append(row)
+            if analysis is not None:
+                rows.append(self._analysis_row(ticker, analysis, inputs.context, config))
         if not rows:
             return _empty_analysis_frame()
         return pd.DataFrame(rows).reindex(columns=list(ANALYSIS_COLUMNS))
+
+    def _fetch_inputs(
+        self, universe: UniverseResult, force_refresh: bool
+    ) -> _ScreenInputs | None:
+        """Fetch the shared market data both ``screen`` and ``analyze`` need.
+
+        Returns ``None`` when there is nothing to evaluate -- an empty universe
+        or no tickers on an allowed exchange.
+        """
+        if not universe.tickers:
+            return None
+        fundamentals = self.client.fetch_fundamentals(universe.tickers, force_refresh=force_refresh)
+        allowed, _ = self.client.filter_allowed_exchanges(fundamentals)
+        if not allowed:
+            return None
+        history = self.client.fetch_history(allowed, period=HISTORY_PERIOD, force_refresh=force_refresh)
+        benchmark_close = self._benchmark_close(force_refresh)
+        context = assess_market_context(benchmark_close, self.strategy)
+        return _ScreenInputs(fundamentals, allowed, history, benchmark_close, context)
 
     def _benchmark_close(self, force_refresh: bool) -> pd.Series:
         history = self.client.fetch_history([BENCHMARK_TICKER], period=HISTORY_PERIOD, force_refresh=force_refresh)
@@ -192,18 +184,17 @@ class ScreenerEngine:
     def _evaluate_ticker(
         self,
         ticker: str,
-        df: pd.DataFrame | None,
-        benchmark_close: pd.Series,
-        context: MarketContext,
-        fundamentals: dict[str, Fundamentals],
+        inputs: _ScreenInputs,
         universe: UniverseResult,
         config: FilterConfig,
     ) -> dict | None:
         """Return a result row for an actionable candidate, else ``None``."""
-        analysis = self._compute_ticker(ticker, df, benchmark_close, fundamentals, universe)
+        analysis = self._compute_ticker(
+            ticker, inputs.history.get(ticker), inputs.benchmark_close, inputs.fundamentals, universe
+        )
         if analysis is None or not self._passes_gates(analysis, config):
             return None
-        rank = composite_rank(analysis.confidence, context)
+        rank = composite_rank(analysis.confidence, inputs.context)
         return _result_row(
             ticker,
             analysis.company_name,
@@ -213,8 +204,39 @@ class ScreenerEngine:
             analysis.plan,
             analysis.confidence,
             rank,
+            inputs.context,
+        )
+
+    def _analysis_row(
+        self,
+        ticker: str,
+        analysis: _TickerAnalysis,
+        context: MarketContext,
+        config: FilterConfig,
+    ) -> dict:
+        """Build an ungated analysis row, falling back to management levels.
+
+        Held/watched names without a fresh entry setup still need a stop and
+        target to display, so we substitute the management plan when the setup
+        produced no entry.
+        """
+        display_plan = analysis.plan
+        if display_plan.entry is None:
+            display_plan = management_plan(analysis.features, self.strategy)
+        rank = composite_rank(analysis.confidence, context)
+        row = _result_row(
+            ticker,
+            analysis.company_name,
+            analysis.fundamental,
+            analysis.features,
+            analysis.setup,
+            display_plan,
+            analysis.confidence,
+            rank,
             context,
         )
+        row['Actionable'] = self._passes_gates(analysis, config)
+        return row
 
     def _compute_ticker(
         self,
