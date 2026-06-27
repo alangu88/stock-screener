@@ -21,7 +21,7 @@ and organizes survivors into a Core / Satellite portfolio.
 <!-- SCREENER:START -->
 ![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-21-blue) ![Adds](https://img.shields.io/badge/adds-0-success)
 
-_Last updated: 2026-06-27 04:45 UTC_
+_Last updated: 2026-06-27 15:36 UTC_
 
 > **Parameters:** Risk/trade 1% · Core band 60%–70% · Add gates conf ≥ 85 & R/R ≥ 2.5 · Max 10 single-stock names · Max position 10%
 
@@ -30,26 +30,26 @@ _Last updated: 2026-06-27 04:45 UTC_
 | Ticker | Setup | Confidence | R/R | Entry | Stop | Target | Rank Score | Actionable |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TSM | Pullback | 80 | 2.62 | 432.35 | 380.47 | 568.52 | 74.19 | Yes |
-| AMD | Pullback | 77 | 3.37 | 521.58 | 458.99 | 732.62 | 71.13 | Yes |
-| COHR | Pullback | 76 | 3.59 | 380.56 | 334.89 | 544.52 | 70.30 | Yes |
-| LLY | Breakout | 76 | 1.71 | 1,208.12 | 1,069.67 | 1,444.82 | 70.11 | Yes |
+| AMD | Pullback | 78 | 3.46 | 517.59 | 455.47 | 732.62 | 71.78 | Yes |
+| COHR | Pullback | 77 | 3.59 | 380.45 | 334.80 | 544.52 | 71.59 | Yes |
 | FSELX | Pullback | 72 | 2.08 | 70.50 | 62.04 | 88.06 | 66.69 | No |
-| VTI | Pullback | 68 | 4.31 | 362.22 | 355.06 | 393.12 | 63.09 | Yes |
-| AVGO | Avoid | 0 | 21.59 | 365.02 | 358.94 | 496.19 | 0.00 | No |
-| AAPL | Avoid | 0 | 3.62 | 283.78 | 271.71 | 327.43 | 0.00 | No |
-| AMZN | Avoid | 0 | 5.40 | 232.69 | 223.58 | 281.89 | 0.00 | No |
-| META | Avoid | 0 | 6.98 | 550.25 | 535.53 | 653.07 | 0.00 | No |
-| MSFT | Avoid | 0 | 4.33 | 372.97 | 345.90 | 490.09 | 0.00 | No |
-| GOOGL | Avoid | 0 | 13.22 | 337.39 | 331.80 | 411.31 | 0.00 | No |
-| LRCX | Avoid | 0 | 4.82 | 379.09 | 348.80 | 525.13 | 0.00 | No |
-| NFLX | Avoid | 0 | 5.78 | 73.81 | 70.24 | 94.43 | 0.00 | No |
-| MU | Avoid | 0 | 4.44 | 1,132.33 | 996.45 | 1,735.12 | 0.00 | No |
-| NOW | Avoid | 0 | 5.10 | 98.34 | 87.79 | 152.10 | 0.00 | No |
-| NVDA | Avoid | 0 | 14.47 | 192.53 | 189.40 | 237.85 | 0.00 | No |
-| SNDK | Avoid | 0 | 4.29 | 2,090.71 | 1,839.82 | 3,167.77 | 0.00 | No |
-| PLTR | Avoid | 0 | 6.99 | 112.93 | 104.73 | 170.26 | 0.00 | No |
-| VXUS | Avoid | 0 | 13.96 | 84.48 | 84.02 | 90.88 | 0.00 | No |
-| XOM | Avoid | 0 | 12.65 | 136.54 | 134.27 | 165.27 | 0.00 | No |
+| VTI | Pullback | 68 | 3.26 | 363.98 | 355.05 | 393.12 | 63.36 | Yes |
+| VXUS | Pullback | 65 | 3.08 | 85.08 | 81.85 | 95.02 | 60.22 | Yes |
+| AVGO | Avoid | 0 | 10.56 | 372.72 | 360.44 | 502.42 | 0.00 | No |
+| AAPL | Avoid | 0 | 11.54 | 275.59 | 271.81 | 319.24 | 0.00 | No |
+| AMZN | Avoid | 0 | 6.23 | 231.48 | 223.59 | 280.68 | 0.00 | No |
+| META | Avoid | 0 | 5.00 | 556.09 | 535.53 | 658.91 | 0.00 | No |
+| GOOGL | Avoid | 0 | 6.53 | 344.13 | 332.98 | 416.90 | 0.00 | No |
+| LLY | Avoid | 0 | 1.78 | 1,198.05 | 1,069.82 | 1,426.77 | 0.00 | No |
+| LRCX | Avoid | 0 | 4.99 | 378.07 | 348.80 | 524.11 | 0.00 | No |
+| NFLX | Avoid | 0 | 4.36 | 74.97 | 70.24 | 95.60 | 0.00 | No |
+| MU | Avoid | 0 | 4.30 | 1,169.34 | 1,029.02 | 1,772.13 | 0.00 | No |
+| MSFT | Avoid | 0 | 5.22 | 368.44 | 345.99 | 485.56 | 0.00 | No |
+| NOW | Avoid | 0 | 5.78 | 97.12 | 87.81 | 150.88 | 0.00 | No |
+| SNDK | Avoid | 0 | 4.17 | 2,152.38 | 1,894.09 | 3,229.44 | 0.00 | No |
+| PLTR | Avoid | 0 | 6.46 | 113.60 | 104.73 | 170.93 | 0.00 | No |
+| NVDA | Avoid | 0 | 9.75 | 194.05 | 189.40 | 239.37 | 0.00 | No |
+| XOM | Avoid | 0 | 12.59 | 136.55 | 134.27 | 165.28 | 0.00 | No |
 
 #### Recommended adds (clear the gates)
 
