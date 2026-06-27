@@ -27,6 +27,9 @@ from src.config import Settings, load_settings  # noqa: E402
 from src.data.cache import SQLiteCache  # noqa: E402
 from src.data.universe import UniverseResult, load_sp500_universe  # noqa: E402
 from src.data.yahoo_client import YahooFinanceClient  # noqa: E402
+from src.export.markdown_format import number as _fmt_number  # noqa: E402
+from src.export.markdown_format import table as _fmt_table  # noqa: E402
+from src.export.markdown_format import text as _fmt_text  # noqa: E402
 from src.screener.advisor import (  # noqa: E402
     add_sizing,
     analysis_lookup,
@@ -54,6 +57,7 @@ from src.screener.holdings import (  # noqa: E402
 )
 from src.screener.portfolio import PortfolioConfig  # noqa: E402
 from src.screener.strategy import StrategyConfig  # noqa: E402
+from src.utils.logger import get_logger  # noqa: E402
 
 PORTFOLIO_FILE = _REPO_ROOT / 'portfolio.txt'
 POSITIONS_FILE = _REPO_ROOT / 'positions.txt'
@@ -63,6 +67,7 @@ REPORT_PATH = REPORTS_DIR / 'daily_report.md'
 
 HISTORY_PERIOD = '2y'
 FUND_QUOTE_TYPES = {'ETF', 'MUTUALFUND'}
+_LOGGER = get_logger('daily_report')
 
 
 # --------------------------------------------------------------------------- #
@@ -76,32 +81,27 @@ def _isna(value) -> bool:
 
 
 def _money(value) -> str:
-    return '\u2014' if _isna(value) else f'${float(value):,.2f}'
+    return _fmt_number(value, ',.2f', prefix='$')
 
 
 def _pct(value) -> str:
-    return '\u2014' if _isna(value) else f'{float(value) * 100:.2f}%'
+    return _fmt_number(value, '.2f', scale=100, suffix='%')
 
 
 def _num(value, digits: int = 2) -> str:
-    return '\u2014' if _isna(value) else f'{float(value):.{digits}f}'
+    return _fmt_number(value, f'.{digits}f')
 
 
 def _int(value) -> str:
-    return '\u2014' if _isna(value) else f'{int(round(float(value)))}'
+    return _fmt_number(value, '.0f')
 
 
 def _text(value) -> str:
-    return '\u2014' if value is None or value == '' else str(value)
+    return _fmt_text(value)
 
 
 def _md_table(headers: list[str], rows: list[list[str]]) -> str:
-    if not rows:
-        return '_None._'
-    head = '| ' + ' | '.join(headers) + ' |'
-    sep = '| ' + ' | '.join(['---'] * len(headers)) + ' |'
-    body = ['| ' + ' | '.join(row) + ' |' for row in rows]
-    return '\n'.join([head, sep, *body])
+    return _fmt_table(headers, rows)
 
 
 # --------------------------------------------------------------------------- #
@@ -567,7 +567,7 @@ def main() -> int:
     except Exception as exc:  # network / data feed problems must not crash the run
         report = _build_unavailable(generated_at, type(exc).__name__)
         REPORT_PATH.write_text(report, encoding='utf-8')
-        print(f'Report unavailable: {type(exc).__name__}: {exc}', file=sys.stderr)
+        _LOGGER.exception('Report generation failed: %s', type(exc).__name__)
         return 1
 
 

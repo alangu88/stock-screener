@@ -229,7 +229,7 @@ stock-screener/
 │   │   ├── universe.py            # S&P 500 constituents
 │   │   └── yahoo_client.py        # yfinance fetch + retries
 │   ├── export/
-│   │   ├── csv_export.py
+│   │   ├── markdown_format.py     # shared Markdown primitives
 │   │   └── markdown_export.py     # snapshot/README rendering
 │   ├── screener/
 │   │   ├── strategy.py            # central StrategyConfig thresholds

@@ -43,6 +43,7 @@ from src.screener.holdings import (  # noqa: E402
 )
 from src.screener.portfolio import PortfolioConfig  # noqa: E402
 from src.screener.strategy import StrategyConfig  # noqa: E402
+from src.utils.logger import get_logger  # noqa: E402
 
 README_PATH = _REPO_ROOT / 'README.md'
 WATCHLIST_PATH = _REPO_ROOT / 'watchlist.txt'
@@ -50,6 +51,7 @@ PORTFOLIO_PATH = _REPO_ROOT / 'portfolio.txt'
 POSITIONS_PATH = _REPO_ROOT / 'positions.txt'
 DEFAULT_SYMBOLS = 0  # 0 (or unset) => screen the entire S&P 500 universe
 DEFAULT_LIMIT = 20
+_LOGGER = get_logger('generate_snapshot')
 
 
 def _env_int(name: str, default: int) -> int:
@@ -152,7 +154,7 @@ def main() -> int:
         )
     except Exception as exc:  # network / data feed problems must not break the README
         block = build_unavailable_markdown(generated_at=generated_at, reason=type(exc).__name__)
-        print(f'Snapshot unavailable: {type(exc).__name__}: {exc}', file=sys.stderr)
+        _LOGGER.exception('Snapshot generation failed: %s', type(exc).__name__)
 
     readme = README_PATH.read_text(encoding='utf-8')
     updated = inject_between_markers(readme, block)

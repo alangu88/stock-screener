@@ -1,9 +1,9 @@
 """Render screener result frames as GitHub-flavoured Markdown.
 
-Mirrors :mod:`src.export.csv_export`: a small, pure serialization layer so the
-daily snapshot written to the README stays consistent with the rest of the
-pipeline. No network, no Streamlit -- everything is derived from the frames the
-engine already produces, which keeps it easy to unit test.
+A small, pure serialization layer so the daily snapshot written to the README
+stays consistent with the rest of the pipeline. No network, no Streamlit --
+everything is derived from the frames the engine already produces, which keeps
+it easy to unit test.
 
 The snapshot has two sections: the **watchlist** (your holdings plus followed
 names, monitored whether or not they are actionable) and the **recommended
@@ -12,11 +12,12 @@ adds** (fresh high-conviction setups that clear the advisor gates).
 
 from __future__ import annotations
 
-import math
-
 import pandas as pd
 
 from src.config import Settings
+from src.export.markdown_format import is_missing, number
+from src.export.markdown_format import table as _markdown_table
+from src.export.markdown_format import text as _shared_text
 
 START_MARKER = '<!-- SCREENER:START -->'
 END_MARKER = '<!-- SCREENER:END -->'
@@ -50,27 +51,27 @@ _WATCHLIST_COLUMNS = (
 
 
 def _is_missing(value) -> bool:
-    return value is None or (isinstance(value, float) and math.isnan(value))
+    return is_missing(value)
 
 
 def _money(value) -> str:
-    return '-' if _is_missing(value) else f'{float(value):,.2f}'
+    return number(value, ',.2f', missing='-')
 
 
 def _ratio(value) -> str:
-    return '-' if _is_missing(value) else f'{float(value):.2f}'
+    return number(value, '.2f', missing='-')
 
 
 def _integer(value) -> str:
-    return '-' if _is_missing(value) else f'{float(value):.0f}'
+    return number(value, '.0f', missing='-')
 
 
 def _percent(value) -> str:
-    return '-' if _is_missing(value) else f'{float(value) * 100:.2f}%'
+    return number(value, '.2f', scale=100, suffix='%', missing='-')
 
 
 def _text(value) -> str:
-    return '' if _is_missing(value) else str(value)
+    return _shared_text(value, missing='')
 
 
 def _flag(value) -> str:
@@ -103,13 +104,6 @@ _WATCHLIST_FORMATTERS = {
 }
 
 
-def _markdown_table(rows: list[list[str]], headers: list[str]) -> str:
-    head = '| ' + ' | '.join(headers) + ' |'
-    divider = '| ' + ' | '.join('---' for _ in headers) + ' |'
-    body = ['| ' + ' | '.join(row) + ' |' for row in rows]
-    return '\n'.join([head, divider, *body])
-
-
 def results_to_markdown(df: pd.DataFrame, limit: int = 15) -> str:
     """Return a Markdown table of the top ``limit`` picks (by Rank Score)."""
     if df is None or df.empty:
@@ -125,7 +119,7 @@ def results_to_markdown(df: pd.DataFrame, limit: int = 15) -> str:
         [_PICK_FORMATTERS[col](row.get(col)) for col in columns]
         for _, row in top.iterrows()
     ]
-    return _markdown_table(rows, list(columns))
+    return _markdown_table(list(columns), rows)
 
 
 def watchlist_to_markdown(df: pd.DataFrame, limit: int = 50) -> str:
@@ -147,7 +141,7 @@ def watchlist_to_markdown(df: pd.DataFrame, limit: int = 50) -> str:
         [_WATCHLIST_FORMATTERS[col](row.get(col)) for col in columns]
         for _, row in top.iterrows()
     ]
-    return _markdown_table(rows, list(columns))
+    return _markdown_table(list(columns), rows)
 
 
 def recommended_to_markdown(df: pd.DataFrame, limit: int = 15) -> str:
