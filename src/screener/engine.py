@@ -18,7 +18,7 @@ from src.screener.ranking import (
 from src.screener.result import RESULT_COLUMNS
 from src.screener.setups import AVOID, detect_setup
 from src.screener.strategy import StrategyConfig
-from src.screener.trade_plan import build_trade_plan
+from src.screener.trade_plan import build_trade_plan, management_plan
 
 HISTORY_PERIOD = '2y'
 BENCHMARK_TICKER = 'SPY'
@@ -161,13 +161,19 @@ class ScreenerEngine:
             if analysis is None:
                 continue
             rank = composite_rank(analysis.confidence, context)
+            # Every analyzed name shows a plan: use the setup's entry plan when
+            # there is one, else fall back to management levels so held/watched
+            # names without a fresh setup still display a stop/target/R-R.
+            display_plan = analysis.plan
+            if display_plan.entry is None:
+                display_plan = management_plan(analysis.features, self.strategy)
             row = _result_row(
                 ticker,
                 analysis.company_name,
                 analysis.fundamental,
                 analysis.features,
                 analysis.setup,
-                analysis.plan,
+                display_plan,
                 analysis.confidence,
                 rank,
                 context,

@@ -95,14 +95,14 @@ def insert_position_line(text: str, section: str | None, line: str) -> str:
     return '\n'.join(out) + '\n'
 
 
-def append_to_positions(section: str | None, ticker: str, entry: float | None, shares: int) -> None:
+def append_to_positions(section: str | None, ticker: str, entry: float | None, shares: float) -> None:
     """Append ``TICKER, cost_basis, shares`` to positions.txt under ``section``."""
     parts = [ticker]
     if entry and not pd.isna(entry):
         parts.append(f'{float(entry):.2f}')
     else:
         parts.append('')
-    parts.append(str(int(shares)))
+    parts.append(f'{float(shares):g}')
     line = ', '.join(parts)
     new_text = insert_position_line(read_file_text(POSITIONS_FILE), section, line)
     POSITIONS_FILE.write_text(new_text, encoding='utf-8')

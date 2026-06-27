@@ -24,7 +24,7 @@ from src.ui.files import (
     positions_sections,
     watchlist_tickers,
 )
-from src.ui.formatting import apply_formatters, integer, money, percent, score
+from src.ui.formatting import apply_formatters, integer, money, percent, score, shares
 
 _REC_FORMATTERS = {
     'Confidence': integer,
@@ -33,7 +33,7 @@ _REC_FORMATTERS = {
     'Stop': money,
     'Target': money,
     'Rank Score': score,
-    'Add Shares': integer,
+    'Add Shares': shares,
     'Add $': money,
 }
 
@@ -193,20 +193,20 @@ def _render_add_to_positions(table: pd.DataFrame) -> None:
         section_options = [*sections, '(no section)']
         section_choice = st.selectbox('Account section', section_options, key='add_pos_section')
 
-        default_shares = int(row['Add Shares']) if pd.notna(row.get('Add Shares')) else 0
+        default_shares = float(row['Add Shares']) if pd.notna(row.get('Add Shares')) else 0.0
         default_entry = float(row['Entry']) if pd.notna(row.get('Entry')) else 0.0
         c1, c2 = st.columns(2)
-        shares = c1.number_input('Shares', min_value=0, value=default_shares, step=1)
+        qty = c1.number_input('Shares', min_value=0.0, value=default_shares, step=0.001, format='%.3f')
         cost_basis = c2.number_input('Cost basis ($)', min_value=0.0, value=default_entry, step=1.0)
 
         if st.button(f'Append {picked} to positions.txt'):
-            if shares <= 0:
+            if qty <= 0:
                 st.warning('Enter a share count greater than zero.')
             else:
                 section = None if section_choice == '(no section)' else section_choice
-                append_to_positions(section, picked, cost_basis or None, int(shares))
+                append_to_positions(section, picked, cost_basis or None, qty)
                 where = f'[{section}]' if section else 'positions.txt'
                 st.success(
-                    f'Added {picked} ({int(shares)} sh) to {where}. '
+                    f'Added {picked} ({qty:g} sh) to {where}. '
                     'Reload positions and re-run Analyze to include it.'
                 )

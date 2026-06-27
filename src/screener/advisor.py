@@ -54,21 +54,29 @@ def add_sizing(
 
 
 def satellite_action(monitor_row, analysis_row: dict, sizing, actionable: bool) -> str:
-    """One-word action hint for a satellite holding (priority-ordered)."""
+    """Descriptive next-step hint for a satellite holding (priority-ordered)."""
     price = monitor_row.get('Price')
     stop = analysis_row.get('Stop')
     vs_sma200 = monitor_row.get('% vs SMA200')
     vs_ema20 = monitor_row.get('% vs EMA20')
     if not _isna(price) and not _isna(stop) and float(price) < float(stop):
-        return 'Stop breached'
+        return 'Exit \u2014 price below stop'
     if not _isna(vs_sma200) and float(vs_sma200) < 0:
-        return 'Trend broke'
+        return 'Trim \u2014 below 200-day trend'
     if actionable and sizing is not None and sizing.shares > 0:
         entry = analysis_row.get('Entry')
-        return f'Add near ${float(entry):,.2f}' if not _isna(entry) else 'Add'
+        return f'Add near ${float(entry):,.2f}' if not _isna(entry) else 'Add to position'
     if not _isna(vs_ema20) and float(vs_ema20) > 0.10:
-        return 'Extended'
-    return 'Hold'
+        return 'Hold \u2014 extended, await pullback'
+    return 'Hold \u2014 trend intact'
+
+
+def core_action(monitor_row) -> str:
+    """Descriptive next-step hint for a core (long-term anchor) holding."""
+    vs_sma200 = monitor_row.get('% vs SMA200')
+    if not _isna(vs_sma200) and float(vs_sma200) < 0:
+        return 'Review \u2014 core below 200-day'
+    return 'Hold \u2014 core anchor'
 
 
 def individual_cap_state(monitor: pd.DataFrame, etfs: set, settings: Settings) -> tuple[bool, str]:

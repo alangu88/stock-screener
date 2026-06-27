@@ -37,6 +37,11 @@ def integer(value) -> str:
     return fmt(value, '.0f')
 
 
+def shares(value) -> str:
+    """Share counts to the thousandth (brokers support fractional shares)."""
+    return fmt(value, '.3f')
+
+
 def multiple(value) -> str:
     return fmt(value, '.2f', 1.0, 'x')
 

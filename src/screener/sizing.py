@@ -7,8 +7,9 @@ no single name dominates the book.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
+
+SHARE_PRECISION = 3  # brokers support fractional shares; size to the thousandth
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,7 @@ class PositionSizing:
     """A suggested add: how many shares, the dollar cost, and the risk taken.
 
     Attributes:
-        shares: Whole shares to add (never negative).
+        shares: Shares to add, fractional to the thousandth (never negative).
         dollars: Dollar cost of the add (``shares * entry``).
         risk_dollars: Dollars at risk on the add if stopped out
             (``shares * (entry - stop)``).
@@ -27,7 +28,7 @@ class PositionSizing:
             reduced the count further.
     """
 
-    shares: int
+    shares: float
     dollars: float
     risk_dollars: float
     weight: float
@@ -58,17 +59,17 @@ def suggest_add_size(
 
     per_share_risk = entry - stop
     risk_budget = account_value * risk_pct
-    risk_shares = math.floor(risk_budget / per_share_risk)
+    risk_shares = risk_budget / per_share_risk
 
     max_position_dollars = max_position_weight * account_value
     remaining_room = max_position_dollars - current_value
-    weight_shares = math.floor(remaining_room / entry) if remaining_room > 0 else 0
+    weight_shares = remaining_room / entry if remaining_room > 0 else 0.0
 
     if weight_shares < risk_shares:
-        shares = max(weight_shares, 0)
+        shares = round(max(weight_shares, 0.0), SHARE_PRECISION)
         capped_by = 'weight'
     else:
-        shares = max(risk_shares, 0)
+        shares = round(max(risk_shares, 0.0), SHARE_PRECISION)
         capped_by = 'risk'
 
     dollars = shares * entry

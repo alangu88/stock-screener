@@ -44,6 +44,57 @@ def build_trade_plan(features: MarketFeatures, setup: Setup, config: StrategyCon
     return _finalize(entry, stop, target, immediate)
 
 
+def management_plan(features: MarketFeatures, config: StrategyConfig) -> TradePlan:
+    """Always-valid trend-management levels for a name with no entry setup.
+
+    Unlike :func:`build_trade_plan` (which intentionally yields ``NO_PLAN`` for
+    ``Avoid`` names), this returns usable management levels for *any* held or
+    watched position so the report can show a stop/target for every row:
+
+    * ``entry`` -- the current price, used as the reference / add level.
+    * ``stop`` -- a trailing stop just below the nearest structural support
+      beneath price (moving average, base low, or contraction low), cushioned by
+      ATR and capped so risk never exceeds ``max_risk_pct``. When price sits
+      below all support (a broken downtrend) the cap itself sets the stop.
+    * ``target`` -- the base's measured move projected from price.
+
+    The levels are always asymmetric (``stop < entry < target``), so this never
+    returns ``NO_PLAN``. ``immediate_entry`` is ``False``: these are management
+    estimates, not a triggered entry signal.
+    """
+    price = features.price
+    if price <= 0:
+        return NO_PLAN
+
+    supports = [s for s in (features.ma_fast, features.ma_long, features.base_low,
+                            features.pivot_low) if s and s < price]
+    risk_floor = price * (1 - config.max_risk_pct)
+    if supports:
+        stop = max(supports) - config.stop_buffer_atr * features.atr
+        stop = max(stop, risk_floor)
+    else:
+        stop = risk_floor
+    if stop >= price:  # support too close after the cushion -> fall back to the cap
+        stop = risk_floor
+
+    target = price + _measured_move(features)
+    if target <= price:
+        target = price + config.min_reward_risk * (price - stop)
+
+    risk_pct = (price - stop) / price
+    reward_pct = (target - price) / price
+    reward_risk = reward_pct / risk_pct if risk_pct > 0 else None
+    return TradePlan(
+        entry=price,
+        stop=stop,
+        target=target,
+        risk_pct=risk_pct,
+        reward_pct=reward_pct,
+        reward_risk=reward_risk,
+        immediate_entry=False,
+    )
+
+
 def _breakout_levels(f: MarketFeatures, config: StrategyConfig):
     entry = f.price  # confirmed breakout -> immediate entry is justified
     target = entry + _measured_move(f)

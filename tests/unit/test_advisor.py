@@ -59,13 +59,13 @@ def test_add_sizing_guards():
 def test_satellite_action_stop_breached():
     monitor_row = {'Price': 88.0, '% vs SMA200': 0.05, '% vs EMA20': 0.0}
     analysis_row = {'Stop': 90.0, 'Entry': 100.0}
-    assert satellite_action(monitor_row, analysis_row, None, False) == 'Stop breached'
+    assert satellite_action(monitor_row, analysis_row, None, False) == 'Exit \u2014 price below stop'
 
 
 def test_satellite_action_trend_broke():
     monitor_row = {'Price': 95.0, '% vs SMA200': -0.02, '% vs EMA20': 0.0}
     analysis_row = {'Stop': 90.0, 'Entry': 100.0}
-    assert satellite_action(monitor_row, analysis_row, None, False) == 'Trend broke'
+    assert satellite_action(monitor_row, analysis_row, None, False) == 'Trim \u2014 below 200-day trend'
 
 
 def test_satellite_action_add_near():
@@ -78,13 +78,13 @@ def test_satellite_action_add_near():
 def test_satellite_action_extended():
     monitor_row = {'Price': 120.0, '% vs SMA200': 0.30, '% vs EMA20': 0.15}
     analysis_row = {'Stop': 90.0, 'Entry': 100.0}
-    assert satellite_action(monitor_row, analysis_row, None, False) == 'Extended'
+    assert satellite_action(monitor_row, analysis_row, None, False) == 'Hold \u2014 extended, await pullback'
 
 
 def test_satellite_action_hold():
     monitor_row = {'Price': 101.0, '% vs SMA200': 0.05, '% vs EMA20': 0.02}
     analysis_row = {'Stop': 90.0, 'Entry': 100.0}
-    assert satellite_action(monitor_row, analysis_row, None, False) == 'Hold'
+    assert satellite_action(monitor_row, analysis_row, None, False) == 'Hold \u2014 trend intact'
 
 
 def _monitor(tickers_sleeves):

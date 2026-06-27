@@ -56,3 +56,11 @@ def test_invalid_stop_returns_none():
 def test_non_positive_account_value_returns_none():
     assert suggest_add_size(0, 0.01, entry=100.0, stop=90.0) is None
     assert suggest_add_size(-5, 0.01, entry=100.0, stop=90.0) is None
+
+
+def test_shares_are_fractional_to_the_thousandth():
+    # $1,000 risk over a $7 per-share risk = 142.857... shares -> rounded to 3 dp.
+    sizing = suggest_add_size(100_000, 0.01, entry=100.0, stop=93.0, max_position_weight=1.0)
+    assert sizing is not None
+    assert sizing.shares == 142.857
+    assert sizing.capped_by == 'risk'

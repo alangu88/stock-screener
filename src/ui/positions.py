@@ -40,7 +40,7 @@ from src.ui.files import (
     reload_positions_input,
     watchlist_tickers,
 )
-from src.ui.formatting import apply_formatters, integer, money, percent, score
+from src.ui.formatting import apply_formatters, integer, money, percent, score, shares
 
 _MONITOR_FORMATTERS = {
     'Price': money,
@@ -52,7 +52,7 @@ _MONITOR_FORMATTERS = {
     '% vs SMA200': percent,
     'Entry': money,
     'Unreal P&L %': percent,
-    'Shares': integer,
+    'Shares': shares,
     'Value': money,
     'Weight %': percent,
     'Unreal P&L $': money,
@@ -65,11 +65,11 @@ _PLAN_FORMATTERS = {
     'Target': money,
     'R/R': score,
     'Confidence': integer,
-    'Shares': integer,
+    'Shares': shares,
     'Value': money,
     'Weight %': percent,
     'Unreal P&L %': percent,
-    'Add Shares': integer,
+    'Add Shares': shares,
     'Add $': money,
 }
 

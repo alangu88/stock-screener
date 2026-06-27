@@ -2,7 +2,7 @@ import pytest
 
 from src.screener.setups import AVOID, BREAKOUT, CONTRACTION, Setup
 from src.screener.strategy import StrategyConfig
-from src.screener.trade_plan import NO_PLAN, build_trade_plan
+from src.screener.trade_plan import NO_PLAN, build_trade_plan, management_plan
 from tests.unit._features_factory import make_features
 
 CONFIG = StrategyConfig()
@@ -52,3 +52,23 @@ def test_avoid_setup_has_no_plan():
     plan = build_trade_plan(features, _setup(AVOID), CONFIG)
     assert plan is NO_PLAN
     assert plan.entry is None
+
+
+def test_management_plan_is_always_valid_and_asymmetric():
+    # Healthy name: stop rides the nearest support below price, target is upside.
+    features = make_features(price=100.0)
+    plan = management_plan(features, CONFIG)
+    assert plan.entry == 100.0
+    assert plan.immediate_entry is False
+    assert plan.stop < plan.entry < plan.target
+    assert plan.reward_risk is not None and plan.reward_risk > 0
+
+
+def test_management_plan_caps_risk_when_price_below_all_support():
+    # Broken downtrend: price under every MA/structure -> stop is the risk cap.
+    features = make_features(
+        price=50.0, ma_fast=95.0, ma_long=85.0, base_low=70.0, pivot_low=72.0
+    )
+    plan = management_plan(features, CONFIG)
+    assert plan.stop == pytest.approx(50.0 * (1 - CONFIG.max_risk_pct))
+    assert plan.stop < plan.entry < plan.target
