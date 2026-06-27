@@ -12,10 +12,11 @@ from dataclasses import dataclass
 
 from src.data.yahoo_client import FundHoldings
 
-# Curated cross-listing aliases: map a fund's local/home-market line (or an
-# alternate listing) to the US-tradable symbol an investor would recognise, so
-# the same company merges instead of splitting across direct + fund exposure.
-ADR_ALIASES: dict[str, str] = {
+# Curated symbol aliases: map a fund's local/home-market line, an alternate
+# listing, or a secondary share class to the US-tradable symbol an investor
+# would recognise, so the same company merges instead of splitting across
+# direct + fund exposure.
+SYMBOL_ALIASES: dict[str, str] = {
     '2330.TW': 'TSM',       # Taiwan Semiconductor
     'ASML.AS': 'ASML',      # ASML (local line vs the ADR funds also hold)
     '0700.HK': 'TCEHY',     # Tencent
@@ -25,14 +26,15 @@ ADR_ALIASES: dict[str, str] = {
     'NOVN.SW': 'NVS',       # Novartis
     'ROG.SW': 'RHHBY',      # Roche
     'ROP.SW': 'RHHBY',      # Roche (alternate Yahoo code seen in VXUS)
+    'GOOG': 'GOOGL',        # Alphabet Class C -> Class A (same company)
 }
 
 
 def normalize_symbol(symbol: str) -> str:
-    """Resolve a cross-listed/ADR symbol to its canonical US-tradable ticker."""
+    """Resolve a cross-listed/ADR/dual-class symbol to its canonical ticker."""
     if not symbol:
         return symbol
-    return ADR_ALIASES.get(symbol.upper(), symbol)
+    return SYMBOL_ALIASES.get(symbol.upper(), symbol)
 
 
 @dataclass

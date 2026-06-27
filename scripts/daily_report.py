@@ -186,10 +186,12 @@ def _legend_section(settings: Settings) -> str:
         'fresh setup these are the actual trigger levels; for every other holding they are '
         '*management* estimates \u2014 **Stop** is a trailing exit just below support, **Target** '
         'is the measured-move upside, and **Entry** is the current reference price.\n'
-        '- **Add (sh)** \u2014 suggested add size in fractional shares, risk-budgeted at '
-        f'{_pct(settings.risk_per_trade)} of the account per trade and capped so no single '
-        f'position exceeds {_pct(settings.max_position_weight)} of the account. A dash means '
-        'no room to add (already at the weight cap) or no valid level.\n'
+        '- **Max add (risk)** — a per-trade risk *ceiling* in fractional shares, '
+        f'risk-budgeted at {_pct(settings.risk_per_trade)} of the account per trade and '
+        f'capped so no single position exceeds {_pct(settings.max_position_weight)} of the '
+        'account. It is **not a recommendation to add**: it does not account for '
+        'sector/theme concentration or your single-stock cap. A dash means no room to add '
+        '(already at the weight cap) or no valid level.\n'
         '- **Sleeve** \u2014 **Core** = long-term anchor (held through noise); **Satellite** = '
         'tactical position managed with the trade plan.\n'
         '- **% vs 200d** \u2014 distance above/below the 200-day average; the primary trend gauge. '
@@ -207,7 +209,7 @@ def _holdings_section(
     if show_acct:
         headers.append('Account')
     headers += ['Sleeve', 'Price', '% vs 200d', 'Value', 'Weight', 'P&L %',
-                'Entry', 'Stop', 'Target', 'R/R', 'Add (sh)', 'Action']
+                'Entry', 'Stop', 'Target', 'R/R', 'Max add (risk)', 'Action']
     ordered = monitor.copy()
     ordered['_core'] = ordered['Sleeve'].map(is_core)
     ordered = ordered.sort_values(
@@ -258,7 +260,7 @@ def _watchlist_section(
 ) -> str:
     """Followed (unheld) names, same plan columns as Holdings for consistency."""
     headers = ['Ticker', 'Price', 'Setup', 'Conf', 'Entry', 'Stop', 'Target',
-               'R/R', 'Add (sh)', 'Action']
+               'R/R', 'Max add (risk)', 'Action']
     rows = []
     for _, r in watch_monitor.iterrows():
         ticker = str(r['Ticker'])
@@ -292,7 +294,7 @@ def _recommendations_section(
             f'R/R \u2265 {_num(settings.rec_min_reward_risk)}).'
         )
     headers = ['Ticker', 'Company', 'Setup', 'Type', 'Conf', 'R/R',
-               'Entry', 'Stop', 'Target', 'Rank', 'Add (sh)', 'Add $']
+               'Entry', 'Stop', 'Target', 'Rank', 'Max add (risk)', 'Add $']
     rows = []
     for _, r in recs.iterrows():
         ticker = str(r['Ticker'])

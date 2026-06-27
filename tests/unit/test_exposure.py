@@ -95,3 +95,19 @@ def test_normalize_symbol_is_identity_for_us_tickers():
     assert normalize_symbol('2330.TW') == 'TSM'
     assert normalize_symbol('') == ''
 
+
+def test_alphabet_share_classes_merge():
+    # GOOG (Class C) collapses into the directly held GOOGL (Class A).
+    assert normalize_symbol('GOOG') == 'GOOGL'
+    fund = _fund('FUND', {'GOOG': 0.10}, {'GOOG': 'Alphabet Inc Class C'})
+    holdings = [('GOOGL', 100.0), ('FUND', 500.0)]
+
+    exposures, _ = look_through_exposure(holdings, {'FUND': fund}, {'FUND'}, account_value=1000.0)
+
+    by_symbol = {e.symbol: e for e in exposures}
+    assert 'GOOG' not in by_symbol
+    googl = by_symbol['GOOGL']
+    assert googl.direct_value == 100.0
+    assert googl.fund_value == 50.0  # 500 * 0.10
+    assert googl.total_value == 150.0
+
