@@ -119,7 +119,7 @@ def recommendation_rows(
 
 
 def rotation_candidates(
-    monitor: pd.DataFrame, analysis: pd.DataFrame | dict, etfs: set
+    monitor: pd.DataFrame, analysis: pd.DataFrame, etfs: set
 ) -> pd.DataFrame:
     """Rank held single-stock satellites weakest-first as rotation/trim ideas.
 
@@ -130,7 +130,7 @@ def rotation_candidates(
     """
     if monitor is None or 'Sleeve' not in monitor.columns:
         return pd.DataFrame()
-    lookup = analysis if isinstance(analysis, dict) else analysis_lookup(analysis)
+    lookup = analysis_lookup(analysis)
     etf_up = {str(t).upper() for t in etfs}
     rows = []
     for _, r in monitor.iterrows():

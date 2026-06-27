@@ -146,35 +146,39 @@ def _size_sleeve(members: pd.DataFrame, allocation: float, cap: float) -> dict:
     ``cap`` is pinned at the cap and the remaining capital is re-shared among the
     others. Names with a non-positive or missing stop distance are skipped.
     """
-    raw: dict = {}
+    raw_weights: dict = {}
     for idx, row in members.iterrows():
         risk = row.get('Risk %')
         if risk is None or is_nan(risk) or risk <= 0:
             continue
         confidence = row.get('Confidence')
         tilt = float(confidence) if confidence is not None and not is_nan(confidence) and confidence > 0 else 1.0
-        raw[idx] = tilt / float(risk)
+        raw_weights[idx] = tilt / float(risk)
 
-    if not raw or allocation <= 0:
+    if not raw_weights or allocation <= 0:
         return {}
 
-    final: dict = {}
+    sized: dict = {}
     remaining = allocation
-    active = set(raw)
-    for _ in range(len(raw) + 1):
-        total = sum(raw[i] for i in active)
-        if not active or total <= 0 or remaining <= 0:
+    unpinned = set(raw_weights)
+    # Each pass distributes the remaining capital proportionally; any name that
+    # would breach the cap is pinned at it and dropped, then we re-share what's
+    # left. At most one name is pinned per pass, so len(raw_weights)+1 passes
+    # always converges.
+    for _ in range(len(raw_weights) + 1):
+        total = sum(raw_weights[i] for i in unpinned)
+        if not unpinned or total <= 0 or remaining <= 0:
             break
-        over = [i for i in active if remaining * raw[i] / total > cap]
-        if not over:
-            for i in active:
-                final[i] = remaining * raw[i] / total
+        over_cap = [i for i in unpinned if remaining * raw_weights[i] / total > cap]
+        if not over_cap:
+            for i in unpinned:
+                sized[i] = remaining * raw_weights[i] / total
             break
-        for i in over:
-            final[i] = cap
-            active.discard(i)
+        for i in over_cap:
+            sized[i] = cap
+            unpinned.discard(i)
             remaining -= cap
-    return final
+    return sized
 
 
 def _market_cap_core(market_cap: float | None) -> float:
