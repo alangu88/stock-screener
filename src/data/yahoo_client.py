@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
@@ -15,7 +15,14 @@ from src.data.rate_limiter import RateLimiter, exponential_backoff_sleep
 from src.utils.errors import DataFetchError
 from src.utils.logger import get_logger
 
-ALLOWED_EXCHANGES = {'NYQ', 'NMS', 'ASE'}
+ALLOWED_EXCHANGES = {
+    'NYQ',  # NYSE
+    'NMS',  # Nasdaq Global Select Market
+    'ASE',  # NYSE American (AMEX)
+    'PCX',  # NYSE Arca (ETFs, e.g. VTI)
+    'NGM',  # Nasdaq Global Market (ETFs, e.g. VXUS)
+    'NAS',  # Nasdaq mutual funds (e.g. FSELX)
+}
 
 
 @dataclass
@@ -27,6 +34,16 @@ class Fundamentals:
     revenue_growth: float | None
     exchange: str | None
     quote_type: str | None = None
+
+
+@dataclass
+class FundHoldings:
+    """Top holdings of a fund (Yahoo exposes only the top ~10)."""
+
+    ticker: str
+    holdings: dict[str, float] = field(default_factory=dict)
+    names: dict[str, str] = field(default_factory=dict)
+    top_weight_total: float = 0.0
 
 
 class YahooFinanceClient:
@@ -201,6 +218,100 @@ class YahooFinanceClient:
             self.logger.warning('Excluded %s symbols outside allowed exchanges', len(excluded))
 
         return included, excluded
+
+    def fetch_fund_holdings(
+        self, tickers: list[str], force_refresh: bool = False
+    ) -> dict[str, FundHoldings]:
+        """Top-holdings look-through for each fund ticker (cached)."""
+        output: dict[str, FundHoldings] = {}
+        for ticker in sorted(set(tickers)):
+            cache_key = f'fund_holdings:{ticker}'
+            if not force_refresh:
+                cached = self.cache.get(cache_key)
+                if cached is not None:
+                    output[ticker] = FundHoldings(**cached)
+                    continue
+            entry = self._fetch_one_fund_holdings(ticker)
+            if entry is not None and entry.holdings:
+                output[ticker] = entry
+                self.cache.set(
+                    cache_key, entry.__dict__, ttl_seconds=self.settings.cache_ttl_hours * 3600
+                )
+        return output
+
+    def _fetch_one_fund_holdings(self, ticker: str) -> FundHoldings | None:
+        try:
+            top = self._with_retry(
+                lambda t=ticker: yf.Ticker(t).funds_data.top_holdings,
+                operation=f'fetch fund holdings {ticker}',
+            )
+        except DataFetchError as exc:
+            self.logger.warning('Skipping fund holdings for %s: %s', ticker, exc)
+            return None
+
+        if top is None or getattr(top, 'empty', True):
+            return None
+
+        holdings: dict[str, float] = {}
+        names: dict[str, str] = {}
+        for symbol, row in top.iterrows():
+            pct = _coerce_number(row.get('Holding Percent'))
+            if pct is None:
+                continue
+            sym = str(symbol)
+            holdings[sym] = float(pct)
+            name = row.get('Name')
+            if name is not None:
+                names[sym] = str(name)
+
+        if not holdings:
+            return None
+        return FundHoldings(
+            ticker=ticker,
+            holdings=holdings,
+            names=names,
+            top_weight_total=sum(holdings.values()),
+        )
+
+    def fetch_industries(
+        self, tickers: list[str], force_refresh: bool = False
+    ) -> dict[str, str]:
+        """Map each ticker to its Yahoo industry (cached separately, long TTL)."""
+        output: dict[str, str] = {}
+        to_fetch: list[str] = []
+        for ticker in sorted(set(tickers)):
+            if not force_refresh:
+                cached = self.cache.get(f'industry:{ticker}')
+                if cached is not None:
+                    output[ticker] = cached
+                    continue
+            to_fetch.append(ticker)
+
+        if not to_fetch:
+            return output
+
+        workers = max(1, min(self.settings.fundamentals_max_workers, len(to_fetch)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            results = executor.map(self._fetch_one_industry, to_fetch)
+
+        ttl_seconds = max(self.settings.cache_ttl_hours, 24 * 7) * 3600
+        for ticker, industry in results:
+            if industry:
+                output[ticker] = industry
+                self.cache.set(f'industry:{ticker}', industry, ttl_seconds=ttl_seconds)
+        return output
+
+    def _fetch_one_industry(self, ticker: str) -> tuple[str, str | None]:
+        try:
+            info = self._with_retry(
+                lambda t=ticker: yf.Ticker(t).info,
+                operation=f'fetch industry {ticker}',
+            )
+        except DataFetchError as exc:
+            self.logger.warning('Skipping industry for %s: %s', ticker, exc)
+            return ticker, None
+        info = info or {}
+        return ticker, info.get('industry')
 
 
 def _coerce_number(value) -> float | None:
