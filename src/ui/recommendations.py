@@ -20,7 +20,6 @@ from src.screener.engine import FilterConfig, ScreenerEngine
 from src.ui.files import (
     append_to_positions,
     etf_tickers,
-    held_tickers,
     positions_sections,
     watchlist_tickers,
 )
@@ -46,6 +45,18 @@ _ROTATION_FORMATTERS = {
 }
 
 
+def _position_values(monitor: pd.DataFrame | None) -> dict[str, float]:
+    """Map ticker -> current position value from the holdings monitor."""
+    if monitor is None or monitor.empty or 'Value' not in monitor.columns:
+        return {}
+    values: dict[str, float] = {}
+    for _, row in monitor.iterrows():
+        value = row.get('Value')
+        if pd.notna(value):
+            values[str(row['Ticker'])] = float(value)
+    return values
+
+
 def render_recommendations(
     cache: SQLiteCache,
     client: YahooFinanceClient,
@@ -55,8 +66,9 @@ def render_recommendations(
     st.subheader('Recommended Adds')
     st.caption(
         'New high-conviction setups from the S&P 500 plus your watchlist, '
-        'excluding names you already hold. Gates are intentionally tight \u2014 '
-        'an empty list most days is expected.'
+        'including names you already hold (adds are sized against your current '
+        'position). Gates are intentionally tight — an empty list most days '
+        'is expected.'
     )
     min_conf, min_rr = _render_gates(settings)
     if st.button('Find recommended adds', type='primary'):
@@ -74,7 +86,8 @@ def render_recommendations(
 
     etfs = st.session_state.get('recommendation_etfs', set())
     account_value = float(st.session_state.get('positions_account_value', 0.0) or 0.0)
-    table = recommendation_rows(recs, account_value, settings, etfs)
+    current_values = _position_values(st.session_state.get('monitor_df'))
+    table = recommendation_rows(recs, account_value, settings, etfs, current_values)
 
     at_cap, cap_note = _cap_state(settings)
     if at_cap:
@@ -126,9 +139,6 @@ def _find_recommendations(
             min_avg_volume=settings.min_avg_volume,
         )
         recs = engine.screen(rec_universe, config=rec_config)
-        held = held_tickers()
-        if not recs.empty and held:
-            recs = recs[~recs['Ticker'].isin(held)]
         recs = recs.sort_values('Rank Score', ascending=False).reset_index(drop=True)
         funds = etf_tickers(client, list(recs['Ticker'])) if not recs.empty else set()
     st.session_state['recommendations'] = recs

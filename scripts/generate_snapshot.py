@@ -119,7 +119,8 @@ def main() -> int:
         companies = dict(sp500.companies)
 
         # Recommended adds: screen the S&P 500 (plus watchlist) at the tight add
-        # gates, then drop names already held.
+        # gates. Names already held are kept -- a fresh setup on an existing
+        # position is still a valid add.
         add_tickers = _trim_tickers(
             list(dict.fromkeys([*sp500.tickers, *watchlist])), max_symbols
         )
@@ -130,8 +131,6 @@ def main() -> int:
             min_avg_volume=settings.min_avg_volume,
         )
         recommended = engine.screen(add_universe, config=add_config)
-        if not recommended.empty and held:
-            recommended = recommended[~recommended['Ticker'].isin(held)].reset_index(drop=True)
 
         # Watchlist monitor: ungated analysis of every followed/held name.
         watch_universe = UniverseResult(

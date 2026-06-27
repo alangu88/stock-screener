@@ -94,13 +94,25 @@ def individual_cap_state(monitor: pd.DataFrame, etfs: set, settings: Settings) -
 
 
 def recommendation_rows(
-    recs: pd.DataFrame, account_value: float, settings: Settings, etfs: set
+    recs: pd.DataFrame,
+    account_value: float,
+    settings: Settings,
+    etfs: set,
+    current_values: dict[str, float] | None = None,
 ) -> pd.DataFrame:
-    """Build the Recommended Adds display rows (numeric; formatting is caller's job)."""
+    """Build the Recommended Adds display rows (numeric; formatting is caller's job).
+
+    ``current_values`` maps ticker -> existing position value so adds to names
+    already held are sized against the weight cap on top of what is owned; names
+    absent from the map are sized as fresh positions.
+    """
+    current_values = current_values or {}
     rows = []
     for _, r in recs.iterrows():
         ticker = str(r['Ticker'])
-        sizing = add_sizing(account_value, settings, r.to_dict(), current_value=0.0)
+        sizing = add_sizing(
+            account_value, settings, r.to_dict(), current_value=current_values.get(ticker, 0.0)
+        )
         rows.append({
             'Ticker': ticker,
             'Company': r.get('Company Name'),

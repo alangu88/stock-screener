@@ -285,20 +285,27 @@ def _watchlist_section(
 
 
 def _recommendations_section(
-    recs: pd.DataFrame, etfs: set, account_value: float, settings: Settings
+    recs: pd.DataFrame,
+    etfs: set,
+    account_value: float,
+    settings: Settings,
+    current_values: dict[str, float] | None = None,
 ) -> str:
     if recs is None or recs.empty:
         return (
-            '## Recommended adds\n\nNo high-conviction adds today \u2014 sitting tight '
-            f'(gates: confidence \u2265 {_num(settings.rec_min_confidence, 0)}, '
-            f'R/R \u2265 {_num(settings.rec_min_reward_risk)}).'
+            '## Recommended adds\n\nNo high-conviction adds today — sitting tight '
+            f'(gates: confidence ≥ {_num(settings.rec_min_confidence, 0)}, '
+            f'R/R ≥ {_num(settings.rec_min_reward_risk)}).'
         )
+    current_values = current_values or {}
     headers = ['Ticker', 'Company', 'Setup', 'Type', 'Conf', 'R/R',
                'Entry', 'Stop', 'Target', 'Rank', 'Max add (risk)', 'Add $']
     rows = []
     for _, r in recs.iterrows():
         ticker = str(r['Ticker'])
-        sizing = add_sizing(account_value, settings, r.to_dict(), current_value=0.0)
+        sizing = add_sizing(
+            account_value, settings, r.to_dict(), current_value=current_values.get(ticker, 0.0)
+        )
         rows.append([
             ticker,
             _text(r.get('Company Name')),
@@ -462,13 +469,18 @@ def _build_report(
     lookup = analysis_lookup(analysis)
     context = _market_context(analysis, recs)
     exposures, tail_value = exposure
+    held_values = {
+        str(r['Ticker']): float(r['Value'])
+        for _, r in monitor.iterrows()
+        if not _isna(r.get('Value'))
+    }
     sections = [
         f'# Daily Position Report\n\n_Generated {generated_at}. Market context: {context}._',
         _legend_section(settings),
         _snapshot_section(monitor, lookup, etfs, account_value, settings),
         _holdings_section(monitor, lookup, account_value, settings),
         _watchlist_section(watch_monitor, lookup, account_value, settings),
-        _recommendations_section(recs, rec_etfs, account_value, settings),
+        _recommendations_section(recs, rec_etfs, account_value, settings, held_values),
         _concentration_section(monitor, analysis, etfs, settings),
     ]
     exposure_section = _exposure_section(exposures, tail_value, account_value)
@@ -540,7 +552,6 @@ def main() -> int:
         )
         recs = engine.screen(rec_universe, config=gate_config)
         if not recs.empty:
-            recs = recs[~recs['Ticker'].isin(held_set)]
             recs = recs.sort_values('Rank Score', ascending=False).reset_index(drop=True)
         rec_etfs = _etf_tickers(client, list(recs['Ticker'])) if not recs.empty else set()
 

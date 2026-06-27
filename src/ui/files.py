@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from src.data.yahoo_client import YahooFinanceClient
-from src.screener.holdings import merge_holdings, parse_portfolio, parse_positions
+from src.screener.holdings import parse_portfolio
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -128,13 +128,3 @@ def etf_tickers(client: YahooFinanceClient, tickers: list[str]) -> set[str]:
         t for t, f in fundamentals.items()
         if (f.quote_type or '').upper() in funds
     }
-
-
-def held_tickers() -> set[str]:
-    """Tickers already held (committed composition merged with private sizes)."""
-    merged = st.session_state.get('merged_entries')
-    if merged:
-        return {entry.ticker for entry in merged}
-    portfolio_entries = parse_portfolio(read_file_text(PORTFOLIO_FILE))
-    position_entries = parse_positions(read_file_text(POSITIONS_FILE))
-    return {entry.ticker for entry in merge_holdings(portfolio_entries, position_entries)}

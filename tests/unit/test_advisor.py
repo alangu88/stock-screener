@@ -150,6 +150,24 @@ def test_recommendation_rows_types_and_sizing():
     assert by_ticker['AAA']['Add $'] is not None
 
 
+def test_recommendation_rows_sizes_held_names_against_current_value():
+    recs = pd.DataFrame([
+        {
+            'Ticker': 'AAA', 'Company Name': 'Alpha', 'Setup': 'breakout',
+            'Confidence': 90, 'R/R': 3.0, 'Entry': 100.0, 'Stop': 90.0,
+            'Target': 130.0, 'Rank Score': 80.0,
+        },
+    ])
+    fresh = recommendation_rows(recs, 100_000, SETTINGS, set())
+    held = recommendation_rows(recs, 100_000, SETTINGS, set(), current_values={'AAA': 9_000.0})
+    fresh_shares = fresh.iloc[0]['Add Shares']
+    held_shares = held.iloc[0]['Add Shares']
+    # Already holding $9k of a $100k book (10% cap) leaves only $1k of room,
+    # so the suggested add must be smaller than a fresh full-size position.
+    assert held_shares < fresh_shares
+
+
+
 def test_rotation_candidates_ranks_weakest_first():
     monitor = pd.DataFrame([
         {'Ticker': 'STRONG', 'Sleeve': 'satellite', '% vs SMA200': 0.20,
