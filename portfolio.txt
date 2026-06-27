@@ -19,6 +19,23 @@
 VTI, core
 VXUS, core
 FSELX, satellite
+META, satellite
+GOOGL, satellite
+MSFT, satellite
+NVDA, satellite
+LRCX, satellite
+TSM, satellite
+XOM, satellite
 
 [Roth IRA]
 VTI, core
+VXUS, core
+FSELX, satellite
+MSFT, satellite
+NOW, satellite
+NVDA, satellite
+COHR, satellite
+PLTR, satellite
+LRCX, satellite
+META, satellite
+XOM, satellite
