@@ -8,6 +8,16 @@
 # and only matters once a name becomes a real position (track it in
 # portfolio.txt then).
 
+AAPL
 AMD
+AMZN
 AVGO
+GOOGL
 LLY
+META
+MSFT
+MU
+NFLX
+NOW
+NVDA
+SNDK

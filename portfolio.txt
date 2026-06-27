@@ -18,7 +18,6 @@
 [Taxable]
 VTI, core
 VXUS, core
-FSELX, satellite
 META, satellite
 GOOGL, satellite
 MSFT, satellite
