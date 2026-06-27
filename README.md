@@ -19,42 +19,23 @@ and organizes survivors into a Core / Satellite portfolio.
 > Generated on demand via the **Daily Screen** workflow or `python scripts/generate_snapshot.py`. Mechanical, research-only.
 
 <!-- SCREENER:START -->
-![Matches](https://img.shields.io/badge/matches-59-blue) ![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Screened](https://img.shields.io/badge/screened-503-lightgrey)
+![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-6-blue) ![Adds](https://img.shields.io/badge/adds-0-success)
 
-_Last updated: 2026-06-26 16:17 UTC_
+_Last updated: 2026-06-27 01:27 UTC_
 
-#### Top picks
+> **Parameters:** Risk/trade 1% · Core band 60%–70% · Add gates conf ≥ 85 & R/R ≥ 2.5 · Max 10 single-stock names · Max position 10%
 
-| Ticker | Setup | Sleeve | Entry | Stop | Target | R/R | Confidence | Position Size % |
+#### Watchlist (your holdings + followed names)
+
+| Ticker | Setup | Confidence | R/R | Entry | Stop | Target | Rank Score | Actionable |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| FFIV | Pullback | Core | 392.15 | 353.49 | 466.59 | 1.93 | 86 | 1.30% |
-| FLEX | Pullback | Core | 151.90 | 133.67 | 212.42 | 3.32 | 84 | 1.04% |
-| BEN | Pullback | Core | 33.16 | 29.47 | 39.13 | 1.62 | 82 | 1.09% |
-| JBHT | Pullback | Core | 276.39 | 243.22 | 351.89 | 2.28 | 82 | 1.01% |
-| GNRC | Pullback | Core | 281.66 | 247.86 | 355.88 | 2.20 | 82 | 1.01% |
-| HST | Pullback | Core | 24.89 | 21.90 | 29.68 | 1.61 | 81 | 1.00% |
-| C | Pullback | Core | 142.46 | 125.36 | 176.16 | 1.97 | 79 | 0.97% |
-| ODFL | Pullback | Core | 218.96 | 192.68 | 314.44 | 3.63 | 78 | 0.97% |
-| DDOG | Pullback | Core | 234.04 | 205.96 | 359.86 | 4.48 | 78 | 0.96% |
-| AMD | Pullback | Core | 517.59 | 455.47 | 732.62 | 3.46 | 78 | 0.96% |
-| COHR | Pullback | Core | 380.45 | 334.80 | 544.52 | 3.59 | 77 | 0.96% |
-| GEV | Pullback | Core | 1,058.63 | 931.59 | 1,467.94 | 3.22 | 77 | 0.95% |
-| NUE | Pullback | Core | 240.34 | 217.51 | 322.31 | 3.59 | 77 | 1.20% |
-| EXPD | Pullback | Core | 160.83 | 148.27 | 187.90 | 2.16 | 76 | 1.45% |
-| EBAY | Pullback | Core | 109.35 | 104.09 | 133.74 | 4.64 | 76 | 2.34% |
-| CRWD | Pullback | Core | 697.48 | 613.79 | 1,016.32 | 3.81 | 76 | 0.93% |
-| ELV | Pullback | Core | 391.21 | 378.62 | 472.72 | 6.48 | 75 | 3.44% |
-| CMI | Pullback | Core | 688.34 | 621.21 | 847.43 | 2.37 | 74 | 1.13% |
-| TXN | Pullback | Core | 297.01 | 270.33 | 394.18 | 3.64 | 74 | 1.22% |
-| TT | Pullback | Core | 478.21 | 435.53 | 572.32 | 2.20 | 72 | 1.20% |
+| AMD | Pullback | 78 | 3.46 | 517.59 | 455.47 | 732.62 | 71.78 | Yes |
+| AVGO | Avoid | 0 | - | - | - | - | 0.00 | No |
+| LLY | Avoid | 0 | - | - | - | - | 0.00 | No |
 
-#### Portfolio sleeves (Core / Satellite)
+#### Recommended adds (clear the gates)
 
-| Sleeve | Positions | Allocation % | Portfolio Heat % | Avg Confidence | Avg R/R | Avg Core Score |
-| --- | --- | --- | --- | --- | --- | --- |
-| Core | 59 | 70.00% | 6.19% | 71 | 2.48 | 0.82 |
-| Satellite | 0 | 0.00% | 0.00% | 0 | 0.00 | 0.00 |
-| Total | 59 | 70.00% | 6.19% | 71 | 2.48 | 0.82 |
+_No candidates cleared the recommendation gates — sitting tight._
 
 > Mechanical signals for research only — not trade recommendations.
 <!-- SCREENER:END -->
