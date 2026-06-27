@@ -22,6 +22,7 @@ ALLOWED_EXCHANGES = {
     'PCX',  # NYSE Arca (ETFs, e.g. VTI)
     'NGM',  # Nasdaq Global Market (ETFs, e.g. VXUS)
     'NAS',  # Nasdaq mutual funds (e.g. FSELX)
+    'BTS',  # Cboe BZX (e.g. CBOE; also lists some ETFs)
 }
 
 
