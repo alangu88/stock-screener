@@ -204,9 +204,13 @@ def _render_add_to_positions(table: pd.DataFrame) -> None:
                 st.warning('Enter a share count greater than zero.')
             else:
                 section = None if section_choice == '(no section)' else section_choice
-                append_to_positions(section, picked, cost_basis or None, qty)
-                where = f'[{section}]' if section else 'positions.txt'
-                st.success(
-                    f'Added {picked} ({qty:g} sh) to {where}. '
-                    'Reload positions and re-run Analyze to include it.'
-                )
+                try:
+                    append_to_positions(section, picked, cost_basis or None, qty)
+                except OSError as exc:
+                    st.error(f'Could not write positions.txt: {exc}')
+                else:
+                    where = f'[{section}]' if section else 'positions.txt'
+                    st.success(
+                        f'Added {picked} ({qty:g} sh) to {where}. '
+                        'Reload positions and re-run Analyze to include it.'
+                    )

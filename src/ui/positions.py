@@ -122,8 +122,12 @@ def _render_inputs() -> float:
         col_save, col_reload = st.columns([1, 1])
         with col_save:
             if st.button(f'Save to {POSITIONS_FILE.name}'):
-                POSITIONS_FILE.write_text(text, encoding='utf-8')
-                st.success(f'Saved your sizes to {POSITIONS_FILE.name}.')
+                try:
+                    POSITIONS_FILE.write_text(text, encoding='utf-8')
+                except OSError as exc:
+                    st.error(f'Could not write {POSITIONS_FILE.name}: {exc}')
+                else:
+                    st.success(f'Saved your sizes to {POSITIONS_FILE.name}.')
         with col_reload:
             st.button(
                 f'Reload from {POSITIONS_FILE.name}',
@@ -425,8 +429,12 @@ def _render_publish_button(merged: list) -> None:
     col1, col2 = st.columns([1, 1])
     with col1:
         if st.button(f'Publish to {PORTFOLIO_FILE.name}'):
-            PORTFOLIO_FILE.write_text(manifest, encoding='utf-8')
-            st.success(f'Wrote composition to {PORTFOLIO_FILE.name}.')
+            try:
+                PORTFOLIO_FILE.write_text(manifest, encoding='utf-8')
+            except OSError as exc:
+                st.error(f'Could not write {PORTFOLIO_FILE.name}: {exc}')
+            else:
+                st.success(f'Wrote composition to {PORTFOLIO_FILE.name}.')
     with col2:
         st.download_button(
             'Download portfolio.txt',
