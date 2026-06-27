@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.utils.errors import ConfigError
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -38,6 +40,59 @@ class Settings:
     max_individual_stocks: int = 10
     rec_min_confidence: float = 85.0
     rec_min_reward_risk: float = 2.5
+
+    def __post_init__(self) -> None:
+        positive = {
+            'cache_ttl_hours': self.cache_ttl_hours,
+            'max_retries': self.max_retries,
+            'fundamentals_max_workers': self.fundamentals_max_workers,
+            'rsi_period': self.rsi_period,
+            'sma_short_window': self.sma_short_window,
+            'sma_long_window': self.sma_long_window,
+            'ema_window': self.ema_window,
+            'volume_window': self.volume_window,
+            'atr_period': self.atr_period,
+            'atr_stop_multiplier': self.atr_stop_multiplier,
+            'max_position_weight': self.max_position_weight,
+            'max_individual_stocks': self.max_individual_stocks,
+            'rec_min_reward_risk': self.rec_min_reward_risk,
+        }
+        for name, value in positive.items():
+            if value <= 0:
+                raise ConfigError(f'{name} must be > 0, got {value!r}')
+
+        non_negative = {
+            'backoff_seconds': self.backoff_seconds,
+            'request_delay_seconds': self.request_delay_seconds,
+            'min_avg_volume': self.min_avg_volume,
+            'risk_per_trade': self.risk_per_trade,
+        }
+        for name, value in non_negative.items():
+            if value < 0:
+                raise ConfigError(f'{name} must be >= 0, got {value!r}')
+
+        fractions = {
+            'core_allocation': self.core_allocation,
+            'core_score_threshold': self.core_score_threshold,
+            'max_position_weight': self.max_position_weight,
+            'risk_per_trade': self.risk_per_trade,
+            'core_allocation_min': self.core_allocation_min,
+            'core_allocation_max': self.core_allocation_max,
+        }
+        for name, value in fractions.items():
+            if not 0.0 <= value <= 1.0:
+                raise ConfigError(f'{name} must be within [0, 1], got {value!r}')
+
+        if self.core_allocation_min > self.core_allocation_max:
+            raise ConfigError(
+                'core_allocation_min must be <= core_allocation_max, got '
+                f'{self.core_allocation_min!r} > {self.core_allocation_max!r}'
+            )
+
+        if not 0.0 <= self.rec_min_confidence <= 100.0:
+            raise ConfigError(
+                f'rec_min_confidence must be within [0, 100], got {self.rec_min_confidence!r}'
+            )
 
 
 def load_settings() -> Settings:

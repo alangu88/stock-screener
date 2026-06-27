@@ -8,3 +8,7 @@ class DataFetchError(ScreenerError):
 
 class UniverseLoadError(ScreenerError):
     pass
+
+
+class ConfigError(ScreenerError):
+    pass
