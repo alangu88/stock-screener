@@ -37,7 +37,7 @@ from src.screener.advisor import (  # noqa: E402
     satellite_action,
 )
 from src.screener.engine import FilterConfig, ScreenerEngine  # noqa: E402
-from src.screener.exposure import look_through_exposure, theme_rollup  # noqa: E402
+from src.screener.exposure import look_through_exposure  # noqa: E402
 from src.screener.holdings import (  # noqa: E402
     SATELLITE,
     PositionEntry,
@@ -314,14 +314,28 @@ def _recommendations_section(
     return '## Recommended adds\n\n' + _md_table(headers, rows)
 
 
+def _company_names(analysis: pd.DataFrame | None) -> dict[str, str]:
+    """Map ticker -> company name from an analysis frame, for labelling direct holdings."""
+    names: dict[str, str] = {}
+    if analysis is None or analysis.empty or 'Company Name' not in analysis.columns:
+        return names
+    for _, r in analysis.iterrows():
+        ticker = str(r['Ticker'])
+        label = r.get('Company Name')
+        if label and not _isna(label):
+            names[ticker] = str(label)
+    return names
+
+
 def _build_exposure(
     client: YahooFinanceClient,
     monitor: pd.DataFrame,
     etfs: set,
     account_value: float,
-) -> tuple[list, float, list]:
+    analysis: pd.DataFrame | None = None,
+) -> tuple[list, float]:
     """Look-through exposure: direct holdings + fund top-holdings."""
-    empty: tuple[list, float, list] = ([], 0.0, [])
+    empty: tuple[list, float] = ([], 0.0)
     if monitor is None or monitor.empty or account_value <= 0:
         return empty
     held_tickers = [str(t) for t in monitor['Ticker']]
@@ -332,18 +346,17 @@ def _build_exposure(
         for _, r in monitor.iterrows()
         if not _isna(r.get('Value'))
     ]
+    name_lookup = _company_names(analysis)
     exposures, tail_value = look_through_exposure(
-        holdings, fund_holdings, fund_tickers, account_value
+        holdings, fund_holdings, fund_tickers, account_value, name_lookup
     )
     if not exposures:
         return empty
-    industry_map = client.fetch_industries(sorted({e.symbol for e in exposures}))
-    themes = theme_rollup(exposures, tail_value, industry_map, account_value)
-    return exposures, tail_value, themes
+    return exposures, tail_value
 
 
 def _exposure_section(
-    exposures: list, tail_value: float, themes: list, account_value: float, top_n: int = 15
+    exposures: list, tail_value: float, account_value: float, top_n: int = 15
 ) -> str:
     if not exposures:
         return ''
@@ -373,15 +386,6 @@ def _exposure_section(
             f'- Other / diversified (fund tail): {_money(tail_value)} '
             f'({_pct(tail_value / account_value if account_value > 0 else 0)})'
         )
-    if themes:
-        lines.append('')
-        lines.append('### By industry / theme')
-        theme_rows = [
-            [label, _money(value), _pct(weight)]
-            for label, value, weight in themes
-            if value > 0
-        ][:12]
-        lines.append(_md_table(['Industry / theme', 'Value', '% acct'], theme_rows))
     return '\n'.join(lines)
 
 
@@ -451,11 +455,11 @@ def _build_report(
     rec_etfs: set,
     account_value: float,
     settings: Settings,
-    exposure: tuple[list, float, list] = ([], 0.0, []),
+    exposure: tuple[list, float] = ([], 0.0),
 ) -> str:
     lookup = analysis_lookup(analysis)
     context = _market_context(analysis, recs)
-    exposures, tail_value, themes = exposure
+    exposures, tail_value = exposure
     sections = [
         f'# Daily Position Report\n\n_Generated {generated_at}. Market context: {context}._',
         _legend_section(settings),
@@ -465,7 +469,7 @@ def _build_report(
         _recommendations_section(recs, rec_etfs, account_value, settings),
         _concentration_section(monitor, analysis, etfs, settings),
     ]
-    exposure_section = _exposure_section(exposures, tail_value, themes, account_value)
+    exposure_section = _exposure_section(exposures, tail_value, account_value)
     if exposure_section:
         sections.append(exposure_section)
     return '\n\n'.join(sections) + '\n'
@@ -538,7 +542,7 @@ def main() -> int:
             recs = recs.sort_values('Rank Score', ascending=False).reset_index(drop=True)
         rec_etfs = _etf_tickers(client, list(recs['Ticker'])) if not recs.empty else set()
 
-        exposure = _build_exposure(client, monitor, etfs, account_value)
+        exposure = _build_exposure(client, monitor, etfs, account_value, analysis)
 
         report = _build_report(
             generated_at=generated_at,

@@ -52,6 +52,7 @@ def look_through_exposure(
     fund_holdings: dict[str, FundHoldings],
     fund_tickers: set[str],
     account_value: float,
+    name_lookup: dict[str, str] | None = None,
 ) -> tuple[list[EffectiveExposure], float]:
     """Resolve ``holdings`` into per-symbol effective exposure.
 
@@ -59,7 +60,11 @@ def look_through_exposure(
     value of the untracked fund tail (the part of broad funds not covered by
     their top holdings). Cross-listed/ADR symbols are normalised so the same
     company merges across direct holdings and fund top-holdings.
+
+    ``name_lookup`` maps a (raw or canonical) ticker to a company name and is
+    used to label direct holdings, which carry no name of their own.
     """
+    name_lookup = name_lookup or {}
     direct: dict[str, float] = {}
     via_funds: dict[str, float] = {}
     names: dict[str, str] = {}
@@ -84,6 +89,10 @@ def look_through_exposure(
         else:
             canonical = normalize_symbol(ticker)
             direct[canonical] = direct.get(canonical, 0.0) + value
+            if canonical not in names:
+                label = name_lookup.get(ticker) or name_lookup.get(canonical)
+                if label:
+                    names[canonical] = label
 
     exposures: list[EffectiveExposure] = []
     for symbol in set(direct) | set(via_funds):
@@ -97,29 +106,3 @@ def look_through_exposure(
 
     exposures.sort(key=lambda exposure: exposure.total_value, reverse=True)
     return exposures, tail_value
-
-
-def theme_rollup(
-    exposures: list[EffectiveExposure],
-    tail_value: float,
-    industry_map: dict[str, str],
-    account_value: float,
-) -> list[tuple[str, float, float]]:
-    """Group effective exposure by industry/theme.
-
-    Returns ``(label, value, weight)`` tuples sorted by value descending. The
-    untracked fund tail is bucketed as ``Other / diversified``.
-    """
-    buckets: dict[str, float] = {}
-    for exposure in exposures:
-        label = industry_map.get(exposure.symbol) or 'Unknown'
-        buckets[label] = buckets.get(label, 0.0) + exposure.total_value
-    if tail_value > 0:
-        buckets['Other / diversified'] = buckets.get('Other / diversified', 0.0) + tail_value
-
-    rows = [
-        (label, value, value / account_value if account_value > 0 else 0.0)
-        for label, value in buckets.items()
-    ]
-    rows.sort(key=lambda row: row[1], reverse=True)
-    return rows

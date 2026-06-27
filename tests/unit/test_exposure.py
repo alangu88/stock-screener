@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.data.yahoo_client import FundHoldings
-from src.screener.exposure import look_through_exposure, normalize_symbol, theme_rollup
+from src.screener.exposure import look_through_exposure, normalize_symbol
 
 
 def _fund(ticker: str, holdings: dict[str, float], names: dict[str, str] | None = None) -> FundHoldings:
@@ -60,28 +60,18 @@ def test_weights_are_zero_when_account_value_is_non_positive():
     assert exposures[0].weight == 0.0
 
 
-def test_theme_rollup_groups_by_industry_and_buckets_tail():
-    fund = _fund('FUND', {'NVDA': 0.20, 'AVGO': 0.10})
-    holdings = [('NVDA', 100.0), ('FUND', 500.0)]
-    exposures, tail = look_through_exposure(holdings, {'FUND': fund}, {'FUND'}, account_value=1000.0)
+def test_direct_holdings_are_labelled_from_the_name_lookup():
+    holdings = [('MSFT', 100.0), ('2330.TW', 50.0)]
+    name_lookup = {'MSFT': 'Microsoft', 'TSM': 'Taiwan Semiconductor'}
 
-    industry_map = {'NVDA': 'Semiconductors', 'AVGO': 'Semiconductors'}
-    rows = theme_rollup(exposures, tail, industry_map, account_value=1000.0)
+    exposures, _ = look_through_exposure(
+        holdings, {}, set(), account_value=1000.0, name_lookup=name_lookup
+    )
 
-    by_label = {label: (value, weight) for label, value, weight in rows}
-    # NVDA: 100 direct + 100 via fund = 200; AVGO: 50 via fund => semis 250.
-    assert by_label['Semiconductors'][0] == 250.0
-    assert by_label['Semiconductors'][1] == 0.25
-    # Tail = 500 * (1 - 0.30) = 350.
-    assert by_label['Other / diversified'][0] == 350.0
-    # Sorted by value descending.
-    assert rows[0][0] == 'Other / diversified'
-
-
-def test_theme_rollup_labels_missing_industry_as_unknown():
-    exposures, tail = look_through_exposure([('XYZ', 100.0)], {}, set(), account_value=100.0)
-    rows = theme_rollup(exposures, tail, {}, account_value=100.0)
-    assert rows[0][0] == 'Unknown'
+    by_symbol = {e.symbol: e for e in exposures}
+    assert by_symbol['MSFT'].name == 'Microsoft'
+    # Lookup resolves via the canonical (normalised) ticker too.
+    assert by_symbol['TSM'].name == 'Taiwan Semiconductor'
 
 
 def test_cross_listed_fund_symbol_merges_with_direct_holding():

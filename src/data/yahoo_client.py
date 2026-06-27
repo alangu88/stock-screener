@@ -273,46 +273,6 @@ class YahooFinanceClient:
             top_weight_total=sum(holdings.values()),
         )
 
-    def fetch_industries(
-        self, tickers: list[str], force_refresh: bool = False
-    ) -> dict[str, str]:
-        """Map each ticker to its Yahoo industry (cached separately, long TTL)."""
-        output: dict[str, str] = {}
-        to_fetch: list[str] = []
-        for ticker in sorted(set(tickers)):
-            if not force_refresh:
-                cached = self.cache.get(f'industry:{ticker}')
-                if cached is not None:
-                    output[ticker] = cached
-                    continue
-            to_fetch.append(ticker)
-
-        if not to_fetch:
-            return output
-
-        workers = max(1, min(self.settings.fundamentals_max_workers, len(to_fetch)))
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            results = executor.map(self._fetch_one_industry, to_fetch)
-
-        ttl_seconds = max(self.settings.cache_ttl_hours, 24 * 7) * 3600
-        for ticker, industry in results:
-            if industry:
-                output[ticker] = industry
-                self.cache.set(f'industry:{ticker}', industry, ttl_seconds=ttl_seconds)
-        return output
-
-    def _fetch_one_industry(self, ticker: str) -> tuple[str, str | None]:
-        try:
-            info = self._with_retry(
-                lambda t=ticker: yf.Ticker(t).info,
-                operation=f'fetch industry {ticker}',
-            )
-        except DataFetchError as exc:
-            self.logger.warning('Skipping industry for %s: %s', ticker, exc)
-            return ticker, None
-        info = info or {}
-        return ticker, info.get('industry')
-
 
 def _coerce_number(value) -> float | None:
     if value is None:
