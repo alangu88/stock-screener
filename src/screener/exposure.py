@@ -8,6 +8,7 @@ reported separately as a diversified tail rather than attributed to any name.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 
 from src.data.yahoo_client import FundHoldings
@@ -37,7 +38,7 @@ def normalize_symbol(symbol: str) -> str:
     return SYMBOL_ALIASES.get(symbol.upper(), symbol)
 
 
-@dataclass
+@dataclass(frozen=True)
 class EffectiveExposure:
     """Combined direct + via-fund exposure to a single underlying symbol."""
 
@@ -60,51 +61,77 @@ def look_through_exposure(
 
     Returns the exposures (sorted by total value, descending) and the dollar
     value of the untracked fund tail (the part of broad funds not covered by
-    their top holdings). Cross-listed/ADR symbols are normalised so the same
-    company merges across direct holdings and fund top-holdings.
+    their top holdings). Cross-listed/ADR/dual-class symbols are normalised so
+    the same company merges across direct holdings and fund top-holdings.
 
     ``name_lookup`` maps a (raw or canonical) ticker to a company name and is
     used to label direct holdings, which carry no name of their own.
     """
     name_lookup = name_lookup or {}
-    direct: dict[str, float] = {}
-    via_funds: dict[str, float] = {}
+    direct: dict[str, float] = defaultdict(float)
+    via_funds: dict[str, float] = defaultdict(float)
     names: dict[str, str] = {}
     tail_value = 0.0
 
     for ticker, value in holdings:
         if value is None or value <= 0:
             continue
-        if ticker in fund_tickers and ticker in fund_holdings:
-            fund = fund_holdings[ticker]
-            covered = 0.0
-            for symbol, weight in fund.holdings.items():
-                canonical = normalize_symbol(symbol)
-                via_funds[canonical] = via_funds.get(canonical, 0.0) + value * weight
-                covered += weight
-                if canonical not in names and symbol in fund.names:
-                    names[canonical] = fund.names[symbol]
-            tail_value += value * max(0.0, 1.0 - covered)
-        elif ticker in fund_tickers:
-            # Fund with no look-through data: treat the whole sleeve as opaque.
-            tail_value += value
+        if ticker in fund_tickers:
+            tail_value += _attribute_fund(fund_holdings.get(ticker), value, via_funds, names)
         else:
             canonical = normalize_symbol(ticker)
-            direct[canonical] = direct.get(canonical, 0.0) + value
-            if canonical not in names:
-                label = name_lookup.get(ticker) or name_lookup.get(canonical)
-                if label:
-                    names[canonical] = label
+            direct[canonical] += value
+            if label := (name_lookup.get(ticker) or name_lookup.get(canonical)):
+                names.setdefault(canonical, label)
 
-    exposures: list[EffectiveExposure] = []
-    for symbol in set(direct) | set(via_funds):
+    return _build_exposures(direct, via_funds, names, account_value), tail_value
+
+
+def _attribute_fund(
+    fund: FundHoldings | None,
+    value: float,
+    via_funds: dict[str, float],
+    names: dict[str, str],
+) -> float:
+    """Spread a fund position across its underlyings (mutating ``via_funds`` and
+    ``names``) and return the untracked-tail dollar value.
+
+    A fund with no published holdings is fully opaque, so its whole value is
+    tail. Otherwise the portion not covered by the top holdings is tail.
+    """
+    if fund is None or not fund.holdings:
+        return value
+    covered = 0.0
+    for symbol, weight in fund.holdings.items():
+        canonical = normalize_symbol(symbol)
+        via_funds[canonical] += value * weight
+        covered += weight
+        if symbol in fund.names:
+            names.setdefault(canonical, fund.names[symbol])
+    return value * max(0.0, 1.0 - covered)
+
+
+def _build_exposures(
+    direct: dict[str, float],
+    via_funds: dict[str, float],
+    names: dict[str, str],
+    account_value: float,
+) -> list[EffectiveExposure]:
+    """Combine direct and via-fund dollars per symbol into sorted exposure rows."""
+    exposures = []
+    for symbol in direct.keys() | via_funds.keys():
         direct_value = direct.get(symbol, 0.0)
         fund_value = via_funds.get(symbol, 0.0)
-        total = direct_value + fund_value
-        weight = total / account_value if account_value > 0 else 0.0
+        total_value = direct_value + fund_value
         exposures.append(
-            EffectiveExposure(symbol, names.get(symbol, ''), direct_value, fund_value, total, weight)
+            EffectiveExposure(
+                symbol=symbol,
+                name=names.get(symbol, ''),
+                direct_value=direct_value,
+                fund_value=fund_value,
+                total_value=total_value,
+                weight=total_value / account_value if account_value > 0 else 0.0,
+            )
         )
-
     exposures.sort(key=lambda exposure: exposure.total_value, reverse=True)
-    return exposures, tail_value
+    return exposures
