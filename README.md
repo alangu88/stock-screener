@@ -19,9 +19,9 @@ and organizes survivors into a Core / Satellite portfolio.
 > Generated on demand via the **Daily Screen** workflow or `python scripts/generate_snapshot.py`. Mechanical, research-only.
 
 <!-- SCREENER:START -->
-![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-6-blue) ![Adds](https://img.shields.io/badge/adds-0-success)
+![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-16-blue) ![Adds](https://img.shields.io/badge/adds-0-success)
 
-_Last updated: 2026-06-27 01:27 UTC_
+_Last updated: 2026-06-27 01:42 UTC_
 
 > **Parameters:** Risk/trade 1% · Core band 60%–70% · Add gates conf ≥ 85 & R/R ≥ 2.5 · Max 10 single-stock names · Max position 10%
 
@@ -29,9 +29,19 @@ _Last updated: 2026-06-27 01:27 UTC_
 
 | Ticker | Setup | Confidence | R/R | Entry | Stop | Target | Rank Score | Actionable |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| TSM | Pullback | 80 | 2.62 | 432.35 | 380.47 | 568.52 | 74.19 | Yes |
 | AMD | Pullback | 78 | 3.46 | 517.59 | 455.47 | 732.62 | 71.78 | Yes |
+| COHR | Pullback | 77 | 3.59 | 380.45 | 334.80 | 544.52 | 71.59 | Yes |
+| GOOGL | Avoid | 0 | - | - | - | - | 0.00 | No |
 | AVGO | Avoid | 0 | - | - | - | - | 0.00 | No |
 | LLY | Avoid | 0 | - | - | - | - | 0.00 | No |
+| LRCX | Avoid | 0 | - | - | - | - | 0.00 | No |
+| MSFT | Avoid | 0 | - | - | - | - | 0.00 | No |
+| META | Avoid | 0 | - | - | - | - | 0.00 | No |
+| NOW | Avoid | 0 | - | - | - | - | 0.00 | No |
+| NVDA | Avoid | 0 | - | - | - | - | 0.00 | No |
+| PLTR | Avoid | 0 | - | - | - | - | 0.00 | No |
+| XOM | Avoid | 0 | - | - | - | - | 0.00 | No |
 
 #### Recommended adds (clear the gates)
 
