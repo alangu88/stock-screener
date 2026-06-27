@@ -1,5 +1,5 @@
 # Development dependencies (testing + linting).
 # Install with: pip install -r requirements-dev.txt
 -r requirements.txt
-pytest>=8.2.0
-ruff>=0.6.0
+pytest>=8.2.0,<10.0
+ruff>=0.6.0,<1.0
