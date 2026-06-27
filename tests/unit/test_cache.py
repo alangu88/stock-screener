@@ -22,3 +22,13 @@ def test_cache_clear(tmp_path: Path):
     cache.set('k2', 123, ttl_seconds=30)
     cache.clear()
     assert cache.get('k2') is None
+
+
+def test_cache_close_allows_reuse(tmp_path: Path):
+    cache = SQLiteCache(tmp_path)
+    cache.set('k3', 'v', ttl_seconds=30)
+    cache.close()
+    # close() is idempotent and the cache reconnects transparently afterwards.
+    cache.close()
+    assert cache.get('k3') == 'v'
+

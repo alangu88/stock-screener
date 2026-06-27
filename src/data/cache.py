@@ -91,3 +91,10 @@ class SQLiteCache:
         total = int(rows[0] or 0)
         live = int(rows[1] or 0)
         return {'total': total, 'live': live, 'expired': max(total - live, 0)}
+
+    def close(self) -> None:
+        """Close the connection bound to the calling thread, if any."""
+        conn = getattr(self._local, 'conn', None)
+        if conn is not None:
+            conn.close()
+            self._local.conn = None
