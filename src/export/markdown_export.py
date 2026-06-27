@@ -1,9 +1,13 @@
-"""Render a screener result frame as GitHub-flavoured Markdown.
+"""Render screener result frames as GitHub-flavoured Markdown.
 
 Mirrors :mod:`src.export.csv_export`: a small, pure serialization layer so the
 daily snapshot written to the README stays consistent with the rest of the
-pipeline. No network, no Streamlit -- everything is derived from the result
-DataFrame the engine already produces, which keeps it easy to unit test.
+pipeline. No network, no Streamlit -- everything is derived from the frames the
+engine already produces, which keeps it easy to unit test.
+
+The snapshot has two sections: the **watchlist** (your holdings plus followed
+names, monitored whether or not they are actionable) and the **recommended
+adds** (fresh high-conviction setups that clear the advisor gates).
 """
 
 from __future__ import annotations
@@ -12,12 +16,12 @@ import math
 
 import pandas as pd
 
-from src.screener.portfolio import sleeve_summary
+from src.config import Settings
 
 START_MARKER = '<!-- SCREENER:START -->'
 END_MARKER = '<!-- SCREENER:END -->'
 
-# Columns shown in the README "top picks" table, in display order.
+# Columns shown in the "recommended adds" table, in display order.
 _PICK_COLUMNS = (
     'Ticker',
     'Setup',
@@ -27,17 +31,21 @@ _PICK_COLUMNS = (
     'Target',
     'R/R',
     'Confidence',
+    'Rank Score',
     'Position Size %',
 )
 
-_SUMMARY_COLUMNS = (
-    'Sleeve',
-    'Positions',
-    'Allocation %',
-    'Portfolio Heat %',
-    'Avg Confidence',
-    'Avg R/R',
-    'Avg Core Score',
+# Columns shown in the "watchlist" monitor table, in display order.
+_WATCHLIST_COLUMNS = (
+    'Ticker',
+    'Setup',
+    'Confidence',
+    'R/R',
+    'Entry',
+    'Stop',
+    'Target',
+    'Rank Score',
+    'Actionable',
 )
 
 
@@ -65,6 +73,10 @@ def _text(value) -> str:
     return '' if _is_missing(value) else str(value)
 
 
+def _flag(value) -> str:
+    return 'Yes' if not _is_missing(value) and bool(value) else 'No'
+
+
 _PICK_FORMATTERS = {
     'Ticker': _text,
     'Setup': _text,
@@ -74,17 +86,20 @@ _PICK_FORMATTERS = {
     'Target': _money,
     'R/R': _ratio,
     'Confidence': _integer,
+    'Rank Score': _ratio,
     'Position Size %': _percent,
 }
 
-_SUMMARY_FORMATTERS = {
-    'Sleeve': _text,
-    'Positions': _integer,
-    'Allocation %': _percent,
-    'Portfolio Heat %': _percent,
-    'Avg Confidence': _integer,
-    'Avg R/R': _ratio,
-    'Avg Core Score': _ratio,
+_WATCHLIST_FORMATTERS = {
+    'Ticker': _text,
+    'Setup': _text,
+    'Confidence': _integer,
+    'R/R': _ratio,
+    'Entry': _money,
+    'Stop': _money,
+    'Target': _money,
+    'Rank Score': _ratio,
+    'Actionable': _flag,
 }
 
 
@@ -113,45 +128,76 @@ def results_to_markdown(df: pd.DataFrame, limit: int = 15) -> str:
     return _markdown_table(rows, list(columns))
 
 
-def sleeve_summary_to_markdown(df: pd.DataFrame) -> str:
-    """Return a Markdown table of the Core/Satellite/Total sleeve roll-up."""
-    if df is None or df.empty or 'Sleeve' not in df.columns:
-        return '_No portfolio sleeves to summarize._'
+def watchlist_to_markdown(df: pd.DataFrame, limit: int = 50) -> str:
+    """Markdown table of the watchlist (held + followed names), strongest first.
 
-    summary = sleeve_summary(df)
-    columns = [c for c in _SUMMARY_COLUMNS if c in summary.columns]
+    Every watchlist name is shown regardless of gating; the ``Actionable``
+    column flags those currently clearing the screen gates.
+    """
+    if df is None or df.empty:
+        return '_Watchlist is empty._'
+
+    ranked = df
+    if 'Rank Score' in df.columns:
+        ranked = df.sort_values(by='Rank Score', ascending=False)
+    top = ranked.head(limit)
+
+    columns = [c for c in _WATCHLIST_COLUMNS if c in top.columns]
     rows = [
-        [_SUMMARY_FORMATTERS[col](row.get(col)) for col in columns]
-        for _, row in summary.iterrows()
+        [_WATCHLIST_FORMATTERS[col](row.get(col)) for col in columns]
+        for _, row in top.iterrows()
     ]
     return _markdown_table(rows, list(columns))
 
 
+def recommended_to_markdown(df: pd.DataFrame, limit: int = 15) -> str:
+    """Markdown table of fresh high-conviction adds (already gated upstream)."""
+    if df is None or df.empty:
+        return '_No candidates cleared the recommendation gates — sitting tight._'
+    return results_to_markdown(df, limit=limit)
+
+
+def _parameters_line(settings: Settings) -> str:
+    """One-line summary of the active risk and portfolio parameters."""
+    parts = (
+        f'Risk/trade {settings.risk_per_trade:.0%}',
+        f'Core band {settings.core_allocation_min:.0%}\u2013{settings.core_allocation_max:.0%}',
+        f'Add gates conf \u2265 {settings.rec_min_confidence:.0f} & R/R \u2265 '
+        f'{settings.rec_min_reward_risk:.1f}',
+        f'Max {settings.max_individual_stocks} single-stock names',
+        f'Max position {settings.max_position_weight:.0%}',
+    )
+    return '> **Parameters:** ' + ' \u00b7 '.join(parts)
+
+
 def build_snapshot_markdown(
-    df: pd.DataFrame,
+    watchlist_df: pd.DataFrame,
+    recommended_df: pd.DataFrame,
     *,
+    settings: Settings,
     generated_at: str,
     regime_label: str,
-    symbols_screened: int,
+    watchlist_count: int,
     limit: int = 15,
 ) -> str:
-    """Assemble the full README snapshot block (badges + tables + disclaimer)."""
-    matches = 0 if df is None else len(df)
+    """Assemble the README snapshot: watchlist monitor + recommended adds."""
+    adds = 0 if recommended_df is None else len(recommended_df)
     badges = ' '.join(
         (
-            f'![Matches](https://img.shields.io/badge/matches-{matches}-blue)',
             f'![Regime](https://img.shields.io/badge/regime-{_badge_value(regime_label)}-informational)',
-            f'![Screened](https://img.shields.io/badge/screened-{symbols_screened}-lightgrey)',
+            f'![Watchlist](https://img.shields.io/badge/watchlist-{watchlist_count}-blue)',
+            f'![Adds](https://img.shields.io/badge/adds-{adds}-success)',
         )
     )
     return '\n\n'.join(
         (
             badges,
             f'_Last updated: {generated_at}_',
-            '#### Top picks',
-            results_to_markdown(df, limit=limit),
-            '#### Portfolio sleeves (Core / Satellite)',
-            sleeve_summary_to_markdown(df),
+            _parameters_line(settings),
+            '#### Watchlist (your holdings + followed names)',
+            watchlist_to_markdown(watchlist_df),
+            '#### Recommended adds (clear the gates)',
+            recommended_to_markdown(recommended_df, limit=limit),
             '> Mechanical signals for research only \u2014 not trade recommendations.',
         )
     )

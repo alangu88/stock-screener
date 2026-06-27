@@ -247,7 +247,6 @@ stock-screener/
 │   │   ├── ranking.py             # confidence + composite rank
 │   │   ├── portfolio.py           # Core/Satellite + risk-parity sizing
 │   │   ├── holdings.py            # positions parsing + MA/P&L monitor
-│   │   ├── backtest.py            # bar-replay simulation
 │   │   ├── result.py              # result schema
 │   │   └── engine.py              # pipeline orchestration
 │   └── utils/
@@ -350,17 +349,6 @@ available variables. The most commonly adjusted values:
 See [`.env.example`](.env.example) for the complete list, including the daily
 snapshot variables.
 
-## Backtesting
-
-The app includes a bar-replay backtester that re-runs the **exact same**
-pipeline (`features → setups → trade_plan → ranking`) at each historical bar
-with no look-ahead, then simulates the planned entry/stop/target forward to
-record realized R-multiples. It reports win rate, expectancy (R), and profit
-factor overall and broken down by setup and confidence tier. Because fills are
-assumed at planned levels with no slippage/commissions on a survivorship-biased
-universe, treat the numbers as **relative comparisons, not a profitability
-claim**.
-
 ## Development
 
 ```bash
@@ -387,7 +375,6 @@ pytest           # run the test suite
 Possible future enhancements:
 
 - Strict fundamentals mode (exclude symbols missing PE or revenue growth).
-- Walk-forward backtest validation and slippage/commission modeling.
 - Supplemental free data sources (e.g. SEC EDGAR insider activity).
 
 ## Disclaimer

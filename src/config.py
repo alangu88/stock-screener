@@ -27,7 +27,6 @@ class Settings:
     atr_stop_multiplier: float = 2.0
 
     # UI and portfolio construction
-    page_size_default: int = 25
     core_allocation: float = 0.70
     core_score_threshold: float = 0.60
     max_position_weight: float = 0.10
@@ -60,7 +59,6 @@ def load_settings() -> Settings:
         ('volume_window', 'VOLUME_WINDOW', int),
         ('atr_period', 'ATR_PERIOD', int),
         ('atr_stop_multiplier', 'ATR_STOP_MULTIPLIER', float),
-        ('page_size_default', 'PAGE_SIZE_DEFAULT', int),
         ('core_allocation', 'CORE_ALLOCATION', float),
         ('core_score_threshold', 'CORE_SCORE_THRESHOLD', float),
         ('max_position_weight', 'MAX_POSITION_WEIGHT', float),

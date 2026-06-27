@@ -27,9 +27,16 @@ from src.config import Settings, load_settings  # noqa: E402
 from src.data.cache import SQLiteCache  # noqa: E402
 from src.data.universe import UniverseResult, load_sp500_universe  # noqa: E402
 from src.data.yahoo_client import YahooFinanceClient  # noqa: E402
+from src.screener.advisor import (  # noqa: E402
+    add_sizing,
+    analysis_lookup,
+    core_rebalance,
+    is_core,
+    rotation_candidates,
+    satellite_action,
+)
 from src.screener.engine import FilterConfig, ScreenerEngine  # noqa: E402
 from src.screener.holdings import (  # noqa: E402
-    CORE,
     SATELLITE,
     PositionEntry,
     account_groups,
@@ -44,7 +51,6 @@ from src.screener.holdings import (  # noqa: E402
     parse_positions,
 )
 from src.screener.portfolio import PortfolioConfig  # noqa: E402
-from src.screener.sizing import suggest_add_size  # noqa: E402
 from src.screener.strategy import StrategyConfig  # noqa: E402
 
 PORTFOLIO_FILE = _REPO_ROOT / 'portfolio.txt'
@@ -117,48 +123,6 @@ def _etf_tickers(client: YahooFinanceClient, tickers: list[str]) -> set[str]:
     }
 
 
-def _analysis_lookup(analysis: pd.DataFrame) -> dict[str, dict]:
-    if analysis is None or analysis.empty:
-        return {}
-    return {str(row['Ticker']): row.to_dict() for _, row in analysis.iterrows()}
-
-
-def _is_core(sleeve) -> bool:
-    return str(sleeve).lower() == CORE
-
-
-def _add_sizing(account_value: float, settings: Settings, row: dict, current_value: float):
-    entry = row.get('Entry')
-    stop = row.get('Stop')
-    if account_value <= 0 or _isna(entry) or _isna(stop):
-        return None
-    return suggest_add_size(
-        account_value,
-        settings.risk_per_trade,
-        float(entry),
-        float(stop),
-        current_value=float(current_value),
-        max_position_weight=settings.max_position_weight,
-    )
-
-
-def _satellite_action(monitor_row, analysis_row: dict, sizing, actionable: bool) -> str:
-    price = monitor_row.get('Price')
-    stop = analysis_row.get('Stop')
-    vs_sma200 = monitor_row.get('% vs SMA200')
-    vs_ema20 = monitor_row.get('% vs EMA20')
-    if not _isna(price) and not _isna(stop) and float(price) < float(stop):
-        return 'Stop breached'
-    if not _isna(vs_sma200) and float(vs_sma200) < 0:
-        return 'Trend broke'
-    if actionable and sizing is not None and sizing.shares > 0:
-        entry = analysis_row.get('Entry')
-        return f'Add near {_money(entry)}' if not _isna(entry) else 'Add'
-    if not _isna(vs_ema20) and float(vs_ema20) > 0.10:
-        return 'Extended'
-    return 'Hold'
-
-
 def _market_context(*frames: pd.DataFrame) -> str:
     for frame in frames:
         if frame is not None and not frame.empty and 'Market Context' in frame.columns:
@@ -197,7 +161,7 @@ def _snapshot_section(
 
     open_risk = 0.0
     for _, r in monitor.iterrows():
-        if _is_core(r['Sleeve']):
+        if is_core(r['Sleeve']):
             continue
         shares, price = r.get('Shares'), r.get('Price')
         stop = lookup.get(str(r['Ticker']), {}).get('Stop')
@@ -214,7 +178,7 @@ def _snapshot_section(
 
 
 def _core_section(monitor: pd.DataFrame) -> str:
-    core = monitor[monitor['Sleeve'].map(_is_core)]
+    core = monitor[monitor['Sleeve'].map(is_core)]
     show_acct = has_accounts(monitor)
     headers = ['Ticker']
     if show_acct:
@@ -242,7 +206,7 @@ def _core_section(monitor: pd.DataFrame) -> str:
 def _satellite_section(
     monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings
 ) -> str:
-    sat = monitor[~monitor['Sleeve'].map(_is_core)]
+    sat = monitor[~monitor['Sleeve'].map(is_core)]
     show_acct = has_accounts(monitor)
     headers = ['Ticker']
     if show_acct:
@@ -255,7 +219,7 @@ def _satellite_section(
         a = lookup.get(ticker, {})
         current_value = float(r['Value']) if not _isna(r.get('Value')) else 0.0
         actionable = bool(a.get('Actionable', False))
-        sizing = _add_sizing(account_value, settings, a, current_value)
+        sizing = add_sizing(account_value, settings, a, current_value)
         row = [ticker]
         if show_acct:
             row.append(_text(r.get('Account')))
@@ -270,7 +234,7 @@ def _satellite_section(
             _pct(r.get('Unreal P&L %')),
             _int(sizing.shares) if sizing else '\u2014',
             _money(sizing.dollars) if sizing else '\u2014',
-            _satellite_action(r, a, sizing, actionable),
+            satellite_action(r, a, sizing, actionable),
         ]
         rows.append(row)
     return '## Satellite holdings\n\n' + _md_table(headers, rows)
@@ -286,7 +250,7 @@ def _watchlist_section(
         ticker = str(r['Ticker'])
         a = lookup.get(ticker, {})
         actionable = bool(a.get('Actionable', False))
-        sizing = _add_sizing(account_value, settings, a, current_value=0.0)
+        sizing = add_sizing(account_value, settings, a, current_value=0.0)
         rows.append([
             ticker,
             _money(r.get('Price')),
@@ -316,7 +280,7 @@ def _recommendations_section(
     rows = []
     for _, r in recs.iterrows():
         ticker = str(r['Ticker'])
-        sizing = _add_sizing(account_value, settings, r.to_dict(), current_value=0.0)
+        sizing = add_sizing(account_value, settings, r.to_dict(), current_value=0.0)
         rows.append([
             ticker,
             _text(r.get('Company Name')),
@@ -334,7 +298,9 @@ def _recommendations_section(
     return '## Recommended adds\n\n' + _md_table(headers, rows)
 
 
-def _concentration_section(monitor: pd.DataFrame) -> str:
+def _concentration_section(
+    monitor: pd.DataFrame, analysis: pd.DataFrame, etfs: set, settings: Settings
+) -> str:
     lines = ['## Risk & concentration', '']
     stats = concentration_summary(monitor)
     if stats is not None:
@@ -347,6 +313,11 @@ def _concentration_section(monitor: pd.DataFrame) -> str:
         )
         lines.append(f'- Effective holdings: {stats.effective_positions:.1f}')
         lines.append(f'- Diversification: {stats.label} (HHI {stats.hhi:.2f})')
+    alloc = allocation_summary(monitor, settings.core_allocation_min, settings.core_allocation_max)
+    if alloc is not None and not alloc.within_band:
+        _, rebalance_note = core_rebalance(alloc)
+        if rebalance_note:
+            lines.append(f'- Rebalance: {rebalance_note}')
     if has_accounts(monitor):
         lines.append('')
         lines.append('### By account')
@@ -356,6 +327,29 @@ def _concentration_section(monitor: pd.DataFrame) -> str:
             value = _money(float(held.sum())) if not held.empty else '\u2014'
             pnl_txt = _money(float(pnl.sum())) if not pnl.empty else '\u2014'
             lines.append(f'- {label}: {len(sub)} position(s), value {value}, P&L {pnl_txt}')
+    rotation = rotation_candidates(monitor, analysis, etfs)
+    if not rotation.empty:
+        lines.append('')
+        lines.append('### Rotation candidates (weakest first)')
+        has_acct = 'Account' in rotation.columns
+        headers = (
+            ['Ticker']
+            + (['Account'] if has_acct else [])
+            + ['Trend', 'RS', 'Weight %', 'Value', 'Unreal P&L %']
+        )
+        rows = [
+            [str(r['Ticker'])]
+            + ([_text(r.get('Account'))] if has_acct else [])
+            + [
+                _pct(r.get('Trend')),
+                _pct(r.get('RS')),
+                _pct(r.get('Weight %')),
+                _money(r.get('Value')),
+                _pct(r.get('Unreal P&L %')),
+            ]
+            for _, r in rotation.iterrows()
+        ]
+        lines.append(_md_table(headers, rows))
     return '\n'.join(lines)
 
 
@@ -371,7 +365,7 @@ def _build_report(
     account_value: float,
     settings: Settings,
 ) -> str:
-    lookup = _analysis_lookup(analysis)
+    lookup = analysis_lookup(analysis)
     context = _market_context(analysis, recs)
     sections = [
         f'# Daily Position Report\n\n_Generated {generated_at}. Market context: {context}._',
@@ -380,7 +374,7 @@ def _build_report(
         _satellite_section(monitor, lookup, account_value, settings),
         _watchlist_section(watch_monitor, lookup, account_value, settings),
         _recommendations_section(recs, rec_etfs, account_value, settings),
-        _concentration_section(monitor),
+        _concentration_section(monitor, analysis, etfs, settings),
     ]
     return '\n\n'.join(sections) + '\n'
 

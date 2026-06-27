@@ -5,14 +5,16 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from src.config import Settings
 from src.export.markdown_export import (
     END_MARKER,
     START_MARKER,
     build_snapshot_markdown,
     build_unavailable_markdown,
     inject_between_markers,
+    recommended_to_markdown,
     results_to_markdown,
-    sleeve_summary_to_markdown,
+    watchlist_to_markdown,
 )
 from src.screener.portfolio import PortfolioConfig, assign_portfolio
 from src.screener.setups import BREAKOUT, CONTRACTION, PULLBACK
@@ -46,6 +48,15 @@ def _frame():
     return assign_portfolio(pd.DataFrame(rows), PortfolioConfig())
 
 
+def _watch_frame():
+    """Analysis-style frame (ungated) with an Actionable flag, as engine.analyze emits."""
+    rows = [
+        {**_row('AAA', PULLBACK, 88, 0.04, 1.2e12, 0.95, 90.0), 'Actionable': True},
+        {**_row('ZZZ', 'Avoid', 0, 0.05, 5e10, 0.20, 0.0), 'Actionable': False},
+    ]
+    return pd.DataFrame(rows)
+
+
 def test_results_to_markdown_has_header_and_limited_rows():
     md = results_to_markdown(_frame(), limit=2)
     lines = md.splitlines()
@@ -61,29 +72,61 @@ def test_results_to_markdown_handles_empty():
     assert 'No symbols matched' in md
 
 
-def test_sleeve_summary_to_markdown_lists_sleeves():
-    md = sleeve_summary_to_markdown(_frame())
-    assert 'Core' in md and 'Satellite' in md and 'Total' in md
+def test_watchlist_to_markdown_lists_names_with_actionable_flag():
+    md = watchlist_to_markdown(_watch_frame())
+    assert '| Ticker |' in md
+    assert 'Actionable' in md
+    assert 'AAA' in md and 'ZZZ' in md  # every watchlist name shown, gated or not
+    assert 'Yes' in md and 'No' in md
+
+
+def test_watchlist_to_markdown_handles_empty():
+    assert 'Watchlist is empty' in watchlist_to_markdown(pd.DataFrame())
 
 
 def test_build_snapshot_markdown_includes_badges_and_sections():
     md = build_snapshot_markdown(
-        _frame(), generated_at='2026-06-26 22:30 UTC', regime_label='Risk-On', symbols_screened=120
+        _watch_frame(),
+        _frame(),
+        settings=Settings(),
+        generated_at='2026-06-26 22:30 UTC',
+        regime_label='Risk-On',
+        watchlist_count=2,
     )
-    assert 'img.shields.io/badge/matches-4' in md
+    assert 'img.shields.io/badge/watchlist-2' in md
+    assert 'badge/adds-4' in md
     assert 'regime-Risk--On' in md  # hyphen escaped for shields.io
-    assert 'screened-120' in md
-    assert 'Top picks' in md
-    assert 'Portfolio sleeves' in md
+    assert '**Parameters:**' in md
+    assert 'Watchlist' in md
+    assert 'Recommended adds' in md
     assert 'research only' in md
 
 
-def test_build_snapshot_markdown_handles_empty_frame():
+def test_build_snapshot_markdown_handles_empty_frames():
     md = build_snapshot_markdown(
-        pd.DataFrame(), generated_at='2026-06-26 22:30 UTC', regime_label='Unknown', symbols_screened=0
+        pd.DataFrame(),
+        pd.DataFrame(),
+        settings=Settings(),
+        generated_at='2026-06-26 22:30 UTC',
+        regime_label='Unknown',
+        watchlist_count=0,
     )
-    assert 'matches-0' in md
-    assert 'No symbols matched' in md
+    assert 'watchlist-0' in md
+    assert 'adds-0' in md
+    assert 'Watchlist is empty' in md
+    assert 'sitting tight' in md
+
+
+def test_recommended_to_markdown_empty_when_no_adds():
+    md = recommended_to_markdown(pd.DataFrame())
+    assert 'sitting tight' in md
+
+
+def test_recommended_to_markdown_renders_picks():
+    md = recommended_to_markdown(_frame(), limit=2)
+    lines = [ln for ln in md.splitlines() if ln.startswith('| ') and 'Ticker' not in ln and '---' not in ln]
+    assert len(lines) == 2  # respects limit
+    assert 'AAA' in md and 'BBB' in md
 
 
 def test_inject_between_markers_replaces_only_marked_region():

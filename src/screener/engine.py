@@ -8,7 +8,6 @@ from src.analysis.features import compute_features
 from src.config import Settings
 from src.data.universe import UniverseResult
 from src.data.yahoo_client import Fundamentals, YahooFinanceClient
-from src.screener.backtest import BacktestParams, Trade, backtest_universe
 from src.screener.portfolio import PortfolioConfig, assign_portfolio
 from src.screener.ranking import (
     MarketContext,
@@ -183,32 +182,6 @@ class ScreenerEngine:
         history = self.client.fetch_history([BENCHMARK_TICKER], period=HISTORY_PERIOD, force_refresh=force_refresh)
         benchmark = history.get(BENCHMARK_TICKER, pd.DataFrame())
         return benchmark.get('Close', pd.Series(dtype=float)).dropna()
-
-    def backtest(
-        self,
-        universe: UniverseResult,
-        params: BacktestParams,
-        force_refresh: bool = False,
-        max_symbols: int | None = None,
-    ) -> list[Trade]:
-        """Replay the live pipeline over historical bars for the universe.
-
-        ``max_symbols`` caps how many symbols are simulated (the run is heavy);
-        ``None`` backtests every allowed symbol.
-        """
-        if not universe.tickers:
-            return []
-
-        fundamentals = self.client.fetch_fundamentals(universe.tickers, force_refresh=force_refresh)
-        allowed, _ = self.client.filter_allowed_exchanges(fundamentals)
-        if max_symbols is not None:
-            allowed = allowed[:max_symbols]
-        if not allowed:
-            return []
-
-        history = self.client.fetch_history(allowed, period=HISTORY_PERIOD, force_refresh=force_refresh)
-        benchmark_close = self._benchmark_close(force_refresh)
-        return backtest_universe(history, benchmark_close, self.strategy, params)
 
     def _evaluate_ticker(
         self,
