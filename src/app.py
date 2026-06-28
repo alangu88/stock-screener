@@ -6,14 +6,25 @@ Run with ``streamlit run src/app.py``. The actual rendering lives in the
 
 from __future__ import annotations
 
-import streamlit as st
+import sys
+from pathlib import Path
 
-from src.ui.charts import render_chart_section
-from src.ui.positions import render_positions
-from src.ui.recommendations import render_recommendations
-from src.ui.report import render_daily_report
-from src.ui.services import get_services
-from src.ui.sidebar import render_cache_controls, render_sidebar
+# ``streamlit run src/app.py`` puts the script's own folder (``src/``) on
+# sys.path, not the repository root, so the absolute ``src.*`` imports below
+# would fail. Add the repo root explicitly to make them resolve regardless of
+# how or from where the app is launched.
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import streamlit as st  # noqa: E402
+
+from src.ui.charts import render_chart_section  # noqa: E402
+from src.ui.positions import render_positions  # noqa: E402
+from src.ui.recommendations import render_recommendations  # noqa: E402
+from src.ui.report import render_daily_report  # noqa: E402
+from src.ui.services import get_services  # noqa: E402
+from src.ui.sidebar import render_cache_controls, render_sidebar  # noqa: E402
 
 st.set_page_config(page_title='Position Manager & Screener', layout='wide')
 
