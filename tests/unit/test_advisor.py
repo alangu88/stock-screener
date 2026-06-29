@@ -3,6 +3,10 @@ import pytest
 
 from src.config import Settings
 from src.screener.advisor import (
+    SCALE_2R,
+    SCALE_EXTENDED,
+    SCALE_TARGET,
+    active_scale_rank,
     add_sizing,
     analysis_lookup,
     confirmation_add,
@@ -218,6 +222,46 @@ def test_swing_action_scale_extended():
         'Take profit \u2014 extended, scale out \u2153'
     )
 
+def test_swing_action_extended_suppressed_when_harvested():
+    # Extended (rank 1) already taken -> trail hint instead of a fresh prompt.
+    monitor_row = {'Price': 115.0, '% vs SMA200': 0.30, '% vs EMA20': 0.15, 'Unreal P&L %': 0.15}
+    analysis_row = {'Stop': 90.0, 'Target': 200.0, 'Entry': 100.0}
+    assert satellite_action(monitor_row, analysis_row, None, False, SWING, SCALE_EXTENDED) == (
+        'Trail — ⅓ taken, let rest run'
+    )
+
+
+def test_swing_action_higher_level_still_fires_after_harvest():
+    # Harvested extended (rank 1) but now at +2R (rank 2) -> the higher level fires.
+    monitor_row = {'Price': 121.0, '% vs SMA200': 0.30, '% vs EMA20': 0.18, 'Unreal P&L %': 0.21}
+    analysis_row = {'Stop': 90.0, 'Target': 200.0, 'Entry': 100.0}
+    assert satellite_action(monitor_row, analysis_row, None, False, SWING, SCALE_EXTENDED) == (
+        'Take profit — +2R, scale out ⅓'
+    )
+
+
+def test_swing_action_cut_never_suppressed_by_harvest():
+    # A hard exit (broken trend) ignores the harvested rank entirely.
+    monitor_row = {'Price': 95.0, '% vs SMA200': -0.02, '% vs EMA20': 0.0, 'Unreal P&L %': -0.05}
+    analysis_row = {'Stop': 90.0, 'Target': 130.0, 'Entry': 100.0}
+    assert satellite_action(monitor_row, analysis_row, None, False, SWING, SCALE_TARGET) == (
+        'Cut — trend broken below 200-day'
+    )
+
+
+def test_active_scale_rank_levels():
+    target_row = {'Price': 132.0, '% vs EMA20': 0.20, 'Unreal P&L %': 0.30}
+    plus2r_row = {'Price': 121.0, '% vs EMA20': 0.18, 'Unreal P&L %': 0.21}
+    ext_row = {'Price': 115.0, '% vs EMA20': 0.15, 'Unreal P&L %': 0.15}
+    none_row = {'Price': 105.0, '% vs EMA20': 0.03, 'Unreal P&L %': 0.05}
+    analysis_row = {'Stop': 90.0, 'Target': 130.0, 'Entry': 100.0}
+    assert active_scale_rank(target_row, analysis_row, SWING) == SCALE_TARGET
+    assert active_scale_rank(plus2r_row, {'Stop': 90.0, 'Target': 200.0, 'Entry': 100.0},
+                             SWING) == SCALE_2R
+    assert active_scale_rank(ext_row, {'Stop': 90.0, 'Target': 200.0, 'Entry': 100.0},
+                             SWING) == SCALE_EXTENDED
+    assert active_scale_rank(none_row, {'Stop': 90.0, 'Target': 200.0, 'Entry': 100.0},
+                             SWING) == 0
 
 def test_swing_action_trail():
     monitor_row = {'Price': 105.0, '% vs SMA200': 0.10, '% vs EMA20': 0.03, 'Unreal P&L %': 0.05}

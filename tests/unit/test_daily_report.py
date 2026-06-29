@@ -116,3 +116,63 @@ def test_scaleout_section_orders_by_proximity_and_marks_reached() -> None:
     assert 'now \u2014' in aaa_line  # reached sell cell marked act-now
     bbb_line = next(ln for ln in out.splitlines() if ln.startswith('| BBB'))
     assert 'to +2R' in bbb_line
+
+
+def test_scaleout_section_marks_harvested_level_taken() -> None:
+    monitor = pd.DataFrame([
+        # extended at 93.5 already passed; harvested -> should read 'taken', not act-now
+        {'Ticker': 'AAA', 'Sleeve': 'Satellite', 'Account': 'Taxable',
+         'Shares': 3.0, 'Price': 100.0, 'EMA20': 85.0},
+    ])
+    lookup = {'AAA': {'Entry': 95.0, 'Stop': 90.0}}
+    harvested = {dr.scaleout_key('Taxable', 'AAA'): dr.SCALE_EXTENDED}
+    out = dr._scaleout_section(monitor, lookup, Settings(), harvested)
+    aaa_line = next(ln for ln in out.splitlines() if ln.startswith('| AAA'))
+    assert '\u2713 taken' in aaa_line  # harvested extended cell marked taken
+    assert 'now \u2014' not in aaa_line  # no longer prompts act-now
+    assert 'to +2R' in aaa_line  # nearest now points at the un-harvested +2R
+
+
+def test_sold_keys_detects_negative_lots() -> None:
+    text = (
+        '[Taxable]\n'
+        'GOOGL, 200.00, 0.5\n'
+        'GOOGL, -, -0.011\n'
+        '# a comment\n'
+        'CASH = 35.37\n'
+        '[Roth IRA]\n'
+        'LRCX, -, -0.052\n'
+    )
+    keys = dr._sold_keys(text)
+    assert keys == {'Taxable|GOOGL', 'Roth IRA|LRCX'}
+
+
+def test_stops_section_breakeven_and_structural_alerts() -> None:
+    monitor = pd.DataFrame([
+        # Up +30% with a 25.6% stop distance and cost ($93.08) above the stop ($90)
+        # -> alert tightens up to breakeven (cost).
+        {'Ticker': 'AAA', 'Sleeve': 'Satellite', 'Account': 'Taxable',
+         'Shares': 2.0, 'Price': 121.0, 'Unreal P&L %': 0.30},
+        # Small gain, below one stop-distance of profit -> alert stays at structural stop.
+        {'Ticker': 'BBB', 'Sleeve': 'Satellite', 'Account': 'Taxable',
+         'Shares': 2.0, 'Price': 104.0, 'Unreal P&L %': 0.05},
+        # Core holdings excluded.
+        {'Ticker': 'CORE', 'Sleeve': 'Core', 'Account': 'Taxable',
+         'Shares': 2.0, 'Price': 100.0, 'Unreal P&L %': 0.10},
+    ])
+    lookup = {
+        'AAA': {'Entry': 100.0, 'Stop': 90.0},
+        'BBB': {'Entry': 100.0, 'Stop': 90.0},
+        'CORE': {'Entry': 50.0, 'Stop': 40.0},
+    }
+    out = dr._stops_section(monitor, lookup, Settings())
+    assert 'CORE' not in out
+    aaa_line = next(ln for ln in out.splitlines() if ln.startswith('| AAA'))
+    assert 'Tighten to breakeven' in aaa_line
+    assert '$93.08' in aaa_line  # cost basis = price / (1 + P&L)
+    bbb_line = next(ln for ln in out.splitlines() if ln.startswith('| BBB'))
+    assert 'Alert at structural stop' in bbb_line
+    assert '$90.00' in bbb_line  # structural stop
+
+
+

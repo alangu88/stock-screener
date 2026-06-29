@@ -32,7 +32,10 @@ from src.export.markdown_format import number as _fmt_number  # noqa: E402
 from src.export.markdown_format import table as _fmt_table  # noqa: E402
 from src.export.markdown_format import text as _fmt_text  # noqa: E402
 from src.screener.advisor import (  # noqa: E402
+    SCALE_2R,
+    SCALE_EXTENDED,
     _isna,
+    active_scale_rank,
     add_sizing,
     analysis_lookup,
     confirmation_add,
@@ -73,6 +76,12 @@ from src.screener.income import (  # noqa: E402
     save_ledger,
 )
 from src.screener.portfolio import PortfolioConfig  # noqa: E402
+from src.screener.scaleout import (  # noqa: E402
+    load_scaleout_ledger,
+    save_scaleout_ledger,
+    scaleout_key,
+    update_scaleout_ledger,
+)
 from src.screener.strategy import StrategyConfig  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
 
@@ -82,6 +91,7 @@ WATCHLIST_FILE = _REPO_ROOT / 'watchlist.txt'
 REPORTS_DIR = _REPO_ROOT / 'reports'
 REPORT_PATH = REPORTS_DIR / 'daily_report.md'
 INCOME_LEDGER_PATH = REPORTS_DIR / '.income_ledger.json'
+SCALEOUT_LEDGER_PATH = REPORTS_DIR / '.scaleout_ledger.json'
 
 HISTORY_PERIOD = '2y'
 FUND_QUOTE_TYPES = {'ETF', 'MUTUALFUND'}
@@ -268,9 +278,11 @@ def _action_plan_section(
     open_risk_pct: float = 0.0,
     earnings: set[str] | None = None,
     cash: float | None = None,
+    harvested: dict[str, int] | None = None,
 ) -> str:
     """Plain-language buy / trim / sell plan for today, sorted by urgency."""
     earnings = earnings or set()
+    harvested = harvested or {}
     show_acct = has_accounts(monitor)
     buys: list[str] = []
     trims: list[str] = []
@@ -284,7 +296,8 @@ def _action_plan_section(
         if is_core(r['Sleeve']):
             continue
         sizing = add_sizing(account_value, settings, a, float(r.get('Value') or 0.0), open_risk_pct)
-        action = satellite_action(r, a, sizing, bool(a.get('Actionable', False)), settings)
+        rank = harvested.get(scaleout_key(r.get('Account'), ticker), 0)
+        action = satellite_action(r, a, sizing, bool(a.get('Actionable', False)), settings, rank)
         label = f'{ticker} ({_text(r.get("Account"))})' if show_acct and r.get('Account') else ticker
         if action.startswith(('Exit', 'Cut')):
             sells.append(f'\U0001f534 {label} \u2014 {action}')
@@ -373,8 +386,10 @@ def _legend_section(settings: Settings) -> str:
 def _holdings_section(
     monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings,
     open_risk_pct: float = 0.0, cash: float | None = None,
+    harvested: dict[str, int] | None = None,
 ) -> str:
     """One consistent table for every holding (core first, then by weight)."""
+    harvested = harvested or {}
     show_acct = has_accounts(monitor)
     headers = ['Ticker']
     if show_acct:
@@ -401,7 +416,8 @@ def _holdings_section(
         else:
             sizing = add_sizing(account_value, settings, a, current_value, open_risk_pct,
                                 cash_available=cash)
-            action = satellite_action(r, a, sizing, actionable, settings)
+            rank = harvested.get(scaleout_key(r.get('Account'), ticker), 0)
+            action = satellite_action(r, a, sizing, actionable, settings, rank)
             can_add = not action.startswith(('Trim', 'Exit', 'Cut', 'Take profit'))
             add_txt = (
                 _num(sizing.shares, 3)
@@ -437,13 +453,18 @@ def _holdings_section(
     return '## Holdings\n\n' + _md_table(headers, rows)
 
 
-def _scaleout_section(monitor: pd.DataFrame, lookup: dict, settings: Settings) -> str:
+def _scaleout_section(
+    monitor: pd.DataFrame, lookup: dict, settings: Settings,
+    harvested: dict[str, int] | None = None,
+) -> str:
     """Profit-taking ladder for satellite holdings: scale out ⅓ at +2R and when extended.
 
-    Rows are ordered by proximity to the nearest scale-out level (already-reached
-    levels first, then closest upcoming). A reached level is marked so it reads as
-    act-now. Returns an empty string when no satellite holding has a usable level.
+    Rows are ordered by proximity to the nearest *un-harvested* scale-out level
+    (already-reached levels first, then closest upcoming). A reached level reads
+    as act-now; a level already taken is marked so it does not re-prompt. Returns
+    an empty string when no satellite holding has a usable level.
     """
+    harvested = harvested or {}
     show_acct = has_accounts(monitor)
 
     def _gap(price: float, level: float | None) -> float | None:
@@ -451,17 +472,29 @@ def _scaleout_section(monitor: pd.DataFrame, lookup: dict, settings: Settings) -
             return None
         return (float(level) - price) / price
 
-    def _level_cell(price: float, shares: float, level: float | None) -> tuple[str, str]:
+    def _level_cell(
+        price: float, shares: float, level: float | None, taken: bool
+    ) -> tuple[str, str]:
         if level is None or _isna(level):
             return '\u2014', '\u2014'
+        if taken:  # already harvested -> show price for reference, no prompt
+            return _money(level), '\u2713 taken'
         third = shares / 3.0
         amt = f'{_num(third, 3)} sh \u2248 {_money(third * float(level))}'
         if price >= float(level):  # already at/through the level -> act now
             return f'{_money(level)} \u2705', f'now \u2014 {amt}'
         return _money(level), amt
 
-    def _nearest_label(gap_2r: float | None, gap_ext: float | None) -> tuple[float, str]:
-        cands = [(g, lbl) for g, lbl in ((gap_2r, '+2R'), (gap_ext, 'extended')) if g is not None]
+    def _nearest_label(
+        gap_2r: float | None, gap_ext: float | None, p2_taken: bool, ex_taken: bool
+    ) -> tuple[float, str]:
+        cands = [
+            (g, lbl)
+            for g, lbl, taken in ((gap_2r, '+2R', p2_taken), (gap_ext, 'extended', ex_taken))
+            if g is not None and not taken
+        ]
+        if not cands:  # every available level already harvested
+            return float('inf'), '\u2713 scaled out'
         gap, lbl = min(cands, key=lambda kv: kv[0])  # most-passed / closest upcoming
         return gap, (f'\u2705 {lbl} hit' if gap <= 0 else f'{_pct(gap)} to {lbl}')
 
@@ -480,9 +513,14 @@ def _scaleout_section(monitor: pd.DataFrame, lookup: dict, settings: Settings) -
             continue
         price = float(price)
         shares = float(shares)
-        sort_gap, nearest_txt = _nearest_label(_gap(price, plus2r), _gap(price, ext))
-        p2_price, p2_sell = _level_cell(price, shares, plus2r)
-        ex_price, ex_sell = _level_cell(price, shares, ext)
+        rank = harvested.get(scaleout_key(r.get('Account'), str(r['Ticker'])), 0)
+        p2_taken = rank >= SCALE_2R
+        ex_taken = rank >= SCALE_EXTENDED
+        sort_gap, nearest_txt = _nearest_label(
+            _gap(price, plus2r), _gap(price, ext), p2_taken, ex_taken
+        )
+        p2_price, p2_sell = _level_cell(price, shares, plus2r, p2_taken)
+        ex_price, ex_sell = _level_cell(price, shares, ext, ex_taken)
         row = [str(r['Ticker'])]
         if show_acct:
             row.append(_text(r.get('Account')))
@@ -506,6 +544,64 @@ def _scaleout_section(monitor: pd.DataFrame, lookup: dict, settings: Settings) -
         'and the 20-EMA._'
     )
     return '## Scale-out ladder\n\n' + _md_table(headers, rows) + note
+
+
+def _stops_section(monitor: pd.DataFrame, lookup: dict, settings: Settings) -> str:
+    """Fidelity-ready stop-alert levels for satellite holdings, nearest first.
+
+    Most fractional lots cannot carry a resting stop order at Fidelity, so this
+    lists the price to set a **price alert** at plus the next stop action. The
+    alert sits at the structural stop, then steps up to your cost (breakeven)
+    once a position is up more than its stop distance so a winner cannot turn
+    into a loss. Core sleeves are managed long-term and excluded. Empty when no
+    satellite holding has a usable stop.
+    """
+    show_acct = has_accounts(monitor)
+    entries = []
+    for _, r in monitor.iterrows():
+        if is_core(r['Sleeve']):
+            continue
+        a = lookup.get(str(r['Ticker']), {})
+        price = r.get('Price')
+        stop = a.get('Stop')
+        shares = r.get('Shares')
+        if _isna(price) or float(price) <= 0 or _isna(stop) or _isna(shares) or float(shares) <= 0:
+            continue
+        price = float(price)
+        stop_f = float(stop)
+        pnl = r.get('Unreal P&L %')
+        risk_pct = (price - stop_f) / price
+        cost = price / (1 + float(pnl)) if not _isna(pnl) and float(pnl) > -1 else None
+        up_one_r = not _isna(pnl) and risk_pct > 0 and float(pnl) >= risk_pct
+        if price <= stop_f:
+            alert, note = stop_f, 'Sell now \u2014 stop hit'
+        elif up_one_r and cost is not None and cost > stop_f:
+            alert, note = cost, 'Tighten to breakeven (cost)'
+        else:
+            alert, note = stop_f, 'Alert at structural stop'
+        gap = (alert - price) / price
+        row = [str(r['Ticker'])]
+        if show_acct:
+            row.append(_text(r.get('Account')))
+        row += [_num(float(shares), 3), _money(price), _money(alert), _pct(gap), note]
+        entries.append((gap, row))
+    if not entries:
+        return ''
+    entries.sort(key=lambda kv: kv[0])  # closest to triggering (or already through) first
+    rows = [row for _, row in entries]
+    headers = ['Ticker']
+    if show_acct:
+        headers.append('Account')
+    headers += ['Shares', 'Price', 'Alert at', '% to alert', 'Next step']
+    note = _escape_dollars(
+        '\n\n_Set a Fidelity **price alert** at each **Alert at** level (fractional shares '
+        'can\u2019t hold resting stop orders); when it fires, sell the position manually. The '
+        'alert sits at the structural stop, then steps up to your **cost (breakeven)** once a '
+        'name is up more than its stop distance \u2014 raise it further under new structure '
+        'after each scale-out, never lower. **% to alert** is the cushion before it triggers '
+        '(negative = price still above the alert; 0 = triggering; positive = already through it)._'
+    )
+    return '## Stops & alerts\n\n' + _md_table(headers, rows) + note
 
 
 def _watchlist_section(
@@ -740,8 +836,10 @@ def _build_report(
     risk_on: bool = True,
     earnings: set[str] | None = None,
     income: list[IncomeEvent] | None = None,
+    harvested: dict[str, int] | None = None,
 ) -> str:
     lookup = analysis_lookup(analysis)
+    harvested = harvested or {}
     context = _market_context(analysis, recs)
     exposures, tail_value = exposure
     _, open_risk_pct = portfolio_open_risk(monitor, lookup, account_value)
@@ -761,11 +859,13 @@ def _build_report(
         _snapshot_section(monitor, lookup, etfs, account_value, settings),
         _action_plan_section(
             monitor, watch_monitor, lookup, recs, account_value, settings, risk_on, open_risk_pct,
-            earnings, cash,
+            earnings, cash, harvested,
         ),
         _income_section(income),
-        _holdings_section(monitor, lookup, account_value, settings, open_risk_pct, cash),
-        _scaleout_section(monitor, lookup, settings),
+        _holdings_section(monitor, lookup, account_value, settings, open_risk_pct, cash,
+                          harvested),
+        _scaleout_section(monitor, lookup, settings, harvested),
+        _stops_section(monitor, lookup, settings),
         _watchlist_section(watch_monitor, lookup, account_value, settings, open_risk_pct, cash),
         _recommendations_section(
             recs, rec_etfs, account_value, settings, held_values, open_risk_pct, cash
@@ -822,6 +922,60 @@ def _screen_recommendations(engine, cache, watch: list[str], gate_config: Filter
     return recs
 
 
+def _sold_keys(positions_text: str) -> set[str]:
+    """Account|ticker keys that carry at least one sell (negative-share) lot.
+
+    Used to bootstrap the scale-out ledger on its first run: a position already
+    carrying a recorded trim is treated as harvested at whatever scale level it
+    currently sits, so the report does not re-prompt the same take-profit.
+    """
+    keys: set[str] = set()
+    account = ''
+    for raw in positions_text.splitlines():
+        line = raw.strip()
+        if line.startswith('[') and line.endswith(']'):
+            account = line[1:-1].strip()
+            continue
+        if not line or line.startswith('#'):
+            continue
+        parts = [p.strip() for p in line.split(',')]
+        if len(parts) < 3 or '=' in parts[0]:
+            continue
+        try:
+            shares = float(parts[-1])
+        except ValueError:
+            continue
+        if shares < 0:
+            keys.add(scaleout_key(account, parts[0]))
+    return keys
+
+
+def _scaleout_state(
+    monitor: pd.DataFrame, analysis: pd.DataFrame, settings: Settings, positions_text: str
+) -> dict[str, int]:
+    """Advance and persist the scale-out ledger; return harvested rank per key.
+
+    Detects executed trims (share count falling while a position sits at a scale
+    level) so already-harvested take-profits stop re-appearing as fresh prompts.
+    """
+    lookup = analysis_lookup(analysis)
+    records = []
+    for _, r in monitor.iterrows():
+        if is_core(r['Sleeve']):
+            continue
+        ticker = str(r['Ticker'])
+        a = lookup.get(ticker, {})
+        key = scaleout_key(r.get('Account'), ticker)
+        shares = float(r.get('Shares') or 0.0)
+        records.append((key, shares, active_scale_rank(r, a, settings)))
+    ledger = load_scaleout_ledger(SCALEOUT_LEDGER_PATH)
+    harvested, ledger = update_scaleout_ledger(
+        records, ledger, first_seen_harvested=_sold_keys(positions_text)
+    )
+    save_scaleout_ledger(SCALEOUT_LEDGER_PATH, ledger)
+    return harvested
+
+
 def _generate_report(client, engine, cache, settings: Settings, generated_at: str) -> tuple[str, str]:
     """Assemble the report markdown plus a one-line status; pure of file writes."""
     positions_text = _read(POSITIONS_FILE)
@@ -869,6 +1023,8 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
     )
     save_ledger(INCOME_LEDGER_PATH, ledger)
 
+    harvested = _scaleout_state(monitor, analysis, settings, positions_text)
+
     report = _build_report(
         generated_at=generated_at,
         monitor=monitor,
@@ -883,6 +1039,7 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
         risk_on=regime_risk_on(client, settings),
         earnings=earnings_soon(client, held, settings.earnings_blackout_days),
         income=income,
+        harvested=harvested,
     )
     status = (f'{len(monitor)} holding(s), {len(watch_monitor)} watch, '
               f'{len(recs)} recommendation(s).')

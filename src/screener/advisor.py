@@ -147,15 +147,20 @@ def confirmation_add(
 
 
 def satellite_action(
-    monitor_row, analysis_row: dict, sizing, actionable: bool, settings: Settings | None = None
+    monitor_row, analysis_row: dict, sizing, actionable: bool, settings: Settings | None = None,
+    harvested_rank: int = 0,
 ) -> str:
     """Descriptive next-step hint for a satellite holding (priority-ordered).
 
     When ``settings.swing_mode`` is on, use explicit swing verbs (Cut / Take
     profit / Trail). Otherwise fall back to the long-only Hold/Trim hints.
+    ``harvested_rank`` only applies to the swing path (see
+    :func:`swing_satellite_action`).
     """
     if settings is not None and settings.swing_mode:
-        return swing_satellite_action(monitor_row, analysis_row, sizing, actionable, settings)
+        return swing_satellite_action(
+            monitor_row, analysis_row, sizing, actionable, settings, harvested_rank
+        )
     price = monitor_row.get('Price')
     stop = analysis_row.get('Stop')
     vs_sma200 = monitor_row.get('% vs SMA200')
@@ -172,13 +177,50 @@ def satellite_action(
     return 'Hold \u2014 trend intact'
 
 
+# Scale-out level ranks (higher = higher-priority profit-taking trigger). Used to
+# remember which scale a position has already harvested so the report does not
+# keep re-recommending the same trim.
+SCALE_EXTENDED = 1
+SCALE_2R = 2
+SCALE_TARGET = 3
+
+
+def active_scale_rank(monitor_row, analysis_row: dict, settings: Settings) -> int:
+    """Highest scale-out level a satellite currently satisfies (0 when none).
+
+    Mirrors the scale branches of :func:`swing_satellite_action`: at/over target
+    (3), up +2R (2), or extended above the 20-EMA while in profit (1).
+    """
+    price = monitor_row.get('Price')
+    if _isna(price):
+        return 0
+    target = analysis_row.get('Target')
+    if not _isna(target) and float(price) >= float(target):
+        return SCALE_TARGET
+    r_mult = open_r_multiple(price, analysis_row.get('Entry'), analysis_row.get('Stop'))
+    if r_mult is not None and r_mult >= 2.0:
+        return SCALE_2R
+    pnl = monitor_row.get('Unreal P&L %')
+    vs_ema20 = monitor_row.get('% vs EMA20')
+    in_profit = not _isna(pnl) and float(pnl) > 0
+    if in_profit and not _isna(vs_ema20) and float(vs_ema20) > settings.swing_extended_atr:
+        return SCALE_EXTENDED
+    return 0
+
+
 def swing_satellite_action(
-    monitor_row, analysis_row: dict, sizing, actionable: bool, settings: Settings
+    monitor_row, analysis_row: dict, sizing, actionable: bool, settings: Settings,
+    harvested_rank: int = 0,
 ) -> str:
     """Explicit swing-trading verbs for a satellite holding (priority-ordered).
 
     Mirrors the best-backtested exit ladder: cut below stop, take profit at
     target, scale 1/3 at +2R, trail to breakeven once +1R, cut broken trend.
+
+    ``harvested_rank`` suppresses scale-outs already executed: a scale at rank
+    ``<=`` ``harvested_rank`` is replaced by a 'Trail -- 1/3 taken' hint instead
+    of re-advising the same trim. Higher-ranked levels still fire, and hard exits
+    (stop hit, broken trend) are never suppressed.
     """
     price = monitor_row.get('Price')
     stop = analysis_row.get('Stop')
@@ -189,19 +231,28 @@ def swing_satellite_action(
     pnl = monitor_row.get('Unreal P&L %')
     in_profit = not _isna(pnl) and float(pnl) > 0
     r_mult = open_r_multiple(price, entry, stop)
+    harvested = False
     if not _isna(price) and not _isna(stop) and float(price) < float(stop):
         return 'Cut \u2014 stop hit' + _trim_hint(monitor_row, 1.0)
     if not _isna(price) and not _isna(target) and float(price) >= float(target):
-        return 'Take profit \u2014 sell \u2153 at target' + _trim_hint(monitor_row, 1 / 3)
+        if SCALE_TARGET > harvested_rank:
+            return 'Take profit \u2014 sell \u2153 at target' + _trim_hint(monitor_row, 1 / 3)
+        harvested = True
     if not _isna(vs_sma200) and float(vs_sma200) < 0:
         return 'Cut \u2014 trend broken below 200-day' + _trim_hint(monitor_row, 1.0)
     if r_mult is not None and r_mult >= 2.0:
-        return 'Take profit \u2014 +2R, scale out \u2153' + _trim_hint(monitor_row, 1 / 3)
+        if SCALE_2R > harvested_rank:
+            return 'Take profit \u2014 +2R, scale out \u2153' + _trim_hint(monitor_row, 1 / 3)
+        harvested = True
     if in_profit and not _isna(vs_ema20) and float(vs_ema20) > settings.swing_extended_atr:
-        return 'Take profit \u2014 extended, scale out \u2153' + _trim_hint(monitor_row, 1 / 3)
+        if SCALE_EXTENDED > harvested_rank:
+            return 'Take profit \u2014 extended, scale out \u2153' + _trim_hint(monitor_row, 1 / 3)
+        harvested = True
     if actionable and sizing is not None and sizing.shares > 0:
         entry = analysis_row.get('Entry')
         return f'Add near ${float(entry):,.2f}' if not _isna(entry) else 'Add to position'
+    if harvested:
+        return 'Trail \u2014 \u2153 taken, let rest run'
     if r_mult is not None and r_mult >= 1.0:
         return 'Trail \u2014 stop to breakeven'
     if in_profit:
