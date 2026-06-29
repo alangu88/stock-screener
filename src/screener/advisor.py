@@ -73,13 +73,14 @@ def _conviction_risk(settings: Settings, confidence) -> float:
 
 def add_sizing(
     account_value: float, settings: Settings, row: dict, current_value: float,
-    open_risk_pct: float = 0.0,
+    open_risk_pct: float = 0.0, cash_available: float | None = None,
 ) -> PositionSizing | None:
     """Risk-based add size for a plan row, or ``None`` when it cannot be sized.
 
     ``open_risk_pct`` is the portfolio's aggregate open risk (stop distance) as a
     fraction of the account. The per-trade risk is trimmed to whatever headroom
     remains under ``max_portfolio_risk``; with no headroom left the add is denied.
+    ``cash_available``, when given, further caps the add to the cash on hand.
     """
     entry = row.get('Entry')
     stop = row.get('Stop')
@@ -97,6 +98,7 @@ def add_sizing(
         float(stop),
         current_value=float(current_value),
         max_position_weight=settings.max_position_weight,
+        cash_available=cash_available,
     )
 
 
@@ -232,12 +234,14 @@ def recommendation_rows(
     etfs: set,
     current_values: dict[str, float] | None = None,
     open_risk_pct: float = 0.0,
+    cash_available: float | None = None,
 ) -> pd.DataFrame:
     """Build the Recommended Adds display rows (numeric; formatting is caller's job).
 
     ``current_values`` maps ticker -> existing position value so adds to names
     already held are sized against the weight cap on top of what is owned; names
-    absent from the map are sized as fresh positions.
+    absent from the map are sized as fresh positions. ``cash_available``, when
+    given, caps each add to the cash on hand.
     """
     current_values = current_values or {}
     rows = []
@@ -246,6 +250,7 @@ def recommendation_rows(
         sizing = add_sizing(
             account_value, settings, r.to_dict(),
             current_value=current_values.get(ticker, 0.0), open_risk_pct=open_risk_pct,
+            cash_available=cash_available,
         )
         rows.append({
             'Ticker': ticker,

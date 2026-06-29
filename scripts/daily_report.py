@@ -214,9 +214,11 @@ def _action_plan_section(
     risk_on: bool = True,
     open_risk_pct: float = 0.0,
     earnings: set[str] | None = None,
+    cash: float | None = None,
 ) -> str:
     """Plain-language buy / trim / sell plan for today, sorted by urgency."""
     earnings = earnings or set()
+    show_acct = has_accounts(monitor)
     buys: list[str] = []
     trims: list[str] = []
     sells: list[str] = []
@@ -229,25 +231,38 @@ def _action_plan_section(
             continue
         sizing = add_sizing(account_value, settings, a, float(r.get('Value') or 0.0), open_risk_pct)
         action = satellite_action(r, a, sizing, bool(a.get('Actionable', False)), settings)
+        label = f'{ticker} ({_text(r.get("Account"))})' if show_acct and r.get('Account') else ticker
         if action.startswith(('Exit', 'Cut')):
-            sells.append(f'\U0001f534 {ticker} \u2014 {action}')
+            sells.append(f'\U0001f534 {label} \u2014 {action}')
         elif action.startswith(('Trim', 'Take profit')):
-            trims.append(f'\U0001f7e1 {ticker} \u2014 {action}')
+            trims.append(f'\U0001f7e1 {label} \u2014 {action}')
 
     # Recommended adds -> buys (suppressed when the market regime is risk-off).
     if risk_on and recs is not None and not recs.empty:
         for _, r in recs.head(5).iterrows():
             tag = ' \u26a0\ufe0f earnings soon' if str(r['Ticker']) in earnings else ''
+            sizing = add_sizing(
+                account_value, settings, r.to_dict(), 0.0, open_risk_pct, cash_available=cash,
+            )
+            size_txt = (
+                f", add {_num(sizing.shares, 3)} sh \u2248 {_money(sizing.dollars)}"
+                if sizing and sizing.shares > 0 else ''
+            )
             buys.append(
                 f"\U0001f7e2 {r['Ticker']} \u2014 {_text(r.get('Setup'))} near {_money(r.get('Entry'))} "
-                f"(R/R {_num(r.get('R/R'))}, conf {_int(r.get('Confidence'))}){tag}"
+                f"(R/R {_num(r.get('R/R'))}, conf {_int(r.get('Confidence'))}{tag}{size_txt})"
             )
 
     if not risk_on:
         buy_text = 'paused \u2014 SPY below 200-day (risk-off regime)'
+    elif buys and cash is not None and cash <= 0:
+        buy_text = 'no cash available \u2014 adds require freeing capital first'
     else:
         buy_text = '; '.join(buys) if buys else 'nothing new \u2014 sit tight'
     lines = ['## Today\u2019s plan', '']
+    if cash is not None:
+        lines.append(f'_Cash available: {_money(max(cash, 0.0))}._')
+        lines.append('')
     lines.append('- **Sell/Cut**: ' + ('; '.join(sells) if sells else 'none'))
     lines.append('- **Trim/Take profit**: ' + ('; '.join(trims) if trims else 'none'))
     lines.append('- **Buy**: ' + buy_text)
@@ -262,11 +277,11 @@ def _legend_section(settings: Settings) -> str:
         '*management* estimates \u2014 **Stop** is a trailing exit just below support, **Target** '
         'is the measured-move upside, and **Entry** is the current reference price.\n'
         '- **Max add (risk)** — a per-trade risk *ceiling* in fractional shares, '
-        f'risk-budgeted at {_pct(settings.risk_per_trade)} of the account per trade and '
+        f'risk-budgeted at {_pct(settings.risk_per_trade)} of the account per trade, '
         f'capped so no single position exceeds {_pct(settings.max_position_weight)} of the '
-        'account. It is **not a recommendation to add**: it does not account for '
-        'sector/theme concentration or your single-stock cap. A dash means no room to add '
-        '(already at the weight cap) or no valid level.\n'
+        'account, and further capped by your available cash. It is **not a recommendation to '
+        'add**: it does not account for sector/theme concentration or your single-stock cap. '
+        'A dash means no room to add (already at the weight cap, no cash) or no valid level.\n'
         '- **Sleeve** \u2014 **Core** = long-term anchor (held through noise); **Satellite** = '
         'tactical position managed with the trade plan.\n'
         '- **% vs 200d** \u2014 distance above/below the 200-day average; the primary trend gauge. '
@@ -279,7 +294,7 @@ def _legend_section(settings: Settings) -> str:
 
 def _holdings_section(
     monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings,
-    open_risk_pct: float = 0.0,
+    open_risk_pct: float = 0.0, cash: float | None = None,
 ) -> str:
     """One consistent table for every holding (core first, then by weight)."""
     show_acct = has_accounts(monitor)
@@ -304,7 +319,8 @@ def _holdings_section(
             add_txt = '\u2014'
             action = core_action(r)
         else:
-            sizing = add_sizing(account_value, settings, a, current_value, open_risk_pct)
+            sizing = add_sizing(account_value, settings, a, current_value, open_risk_pct,
+                                cash_available=cash)
             action = satellite_action(r, a, sizing, actionable, settings)
             can_add = not action.startswith(('Trim', 'Exit', 'Cut', 'Take profit'))
             add_txt = (
@@ -340,7 +356,7 @@ def _holdings_section(
 
 def _watchlist_section(
     watch_monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings,
-    open_risk_pct: float = 0.0,
+    open_risk_pct: float = 0.0, cash: float | None = None,
 ) -> str:
     """Followed (unheld) names, same plan columns as Holdings for consistency."""
     headers = ['Ticker', 'Price', 'Setup', 'Conf', 'Entry', 'Stop', 'Target',
@@ -350,7 +366,7 @@ def _watchlist_section(
         ticker = str(r['Ticker'])
         a = lookup.get(ticker, {})
         actionable = bool(a.get('Actionable', False))
-        sizing = add_sizing(account_value, settings, a, 0.0, open_risk_pct)
+        sizing = add_sizing(account_value, settings, a, 0.0, open_risk_pct, cash_available=cash)
         add_txt = _num(sizing.shares, 3) if sizing and sizing.shares > 0 else '\u2014'
         action = 'Buy candidate \u2014 setup live' if actionable else 'Watch \u2014 no setup yet'
         rows.append([
@@ -375,6 +391,7 @@ def _recommendations_section(
     settings: Settings,
     current_values: dict[str, float] | None = None,
     open_risk_pct: float = 0.0,
+    cash: float | None = None,
 ) -> str:
     if recs is None or recs.empty:
         return (
@@ -391,6 +408,7 @@ def _recommendations_section(
         sizing = add_sizing(
             account_value, settings, r.to_dict(),
             current_value=current_values.get(ticker, 0.0), open_risk_pct=open_risk_pct,
+            cash_available=cash,
         )
         rows.append([
             ticker,
@@ -406,7 +424,13 @@ def _recommendations_section(
             _num(sizing.shares, 3) if sizing else '\u2014',
             _money(sizing.dollars) if sizing else '\u2014',
         ])
-    return '## Recommended adds\n\n' + _md_table(headers, rows)
+    note = ''
+    if cash is not None:
+        note = (
+            f'\n\n_Add sizes are capped to your {_money(max(cash, 0.0))} cash on hand; '
+            'amounts are per-name, so you cannot take every add at once._'
+        )
+    return '## Recommended adds\n\n' + _md_table(headers, rows) + note
 
 
 def _company_names(analysis: pd.DataFrame | None) -> dict[str, str]:
@@ -563,6 +587,7 @@ def _build_report(
         for _, r in monitor.iterrows()
         if not _isna(r.get('Value'))
     }
+    cash = max(account_value - sum(held_values.values()), 0.0)
     sections = [
         f'# Daily Position Report\n\n_Generated {generated_at}. Market context: {context}. '
         f'Regime: {"Risk-On" if risk_on else "Risk-Off"}._',
@@ -570,11 +595,13 @@ def _build_report(
         _snapshot_section(monitor, lookup, etfs, account_value, settings),
         _action_plan_section(
             monitor, watch_monitor, lookup, recs, account_value, settings, risk_on, open_risk_pct,
-            earnings,
+            earnings, cash,
         ),
-        _holdings_section(monitor, lookup, account_value, settings, open_risk_pct),
-        _watchlist_section(watch_monitor, lookup, account_value, settings, open_risk_pct),
-        _recommendations_section(recs, rec_etfs, account_value, settings, held_values, open_risk_pct),
+        _holdings_section(monitor, lookup, account_value, settings, open_risk_pct, cash),
+        _watchlist_section(watch_monitor, lookup, account_value, settings, open_risk_pct, cash),
+        _recommendations_section(
+            recs, rec_etfs, account_value, settings, held_values, open_risk_pct, cash
+        ),
         _concentration_section(monitor, analysis, etfs, settings),
     ]
     exposure_section = _exposure_section(exposures, tail_value, account_value)

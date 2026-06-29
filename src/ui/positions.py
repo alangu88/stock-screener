@@ -224,9 +224,9 @@ def _render_overview(monitor: pd.DataFrame, settings: Settings, account_value: f
         st.warning('Risk-off: SPY is below its 200-day — new buys are paused.')
     headroom = max(settings.max_portfolio_risk - open_risk_pct, 0.0)
     held_value = monitor['Value'].dropna()
+    total = float(held_value.sum()) if not held_value.empty else 0.0
+    cash = max(account_value - total, 0.0) if account_value > 0 else None
     if not held_value.empty:
-        total = float(held_value.sum())
-        cash = max(account_value - total, 0.0)
         c1, c2, c3, c4 = st.columns(4)
         c1.metric('Portfolio value', money(total))
         c2.metric('Unrealized P&L', money(float(monitor['Unreal P&L $'].dropna().sum())))
@@ -237,9 +237,11 @@ def _render_overview(monitor: pd.DataFrame, settings: Settings, account_value: f
     with core_tab:
         _render_core_panel(monitor)
     with sat_tab:
-        _render_satellite_panel(monitor, lookup, account_value, settings, open_risk_pct, earnings)
+        _render_satellite_panel(
+            monitor, lookup, account_value, settings, open_risk_pct, earnings, cash
+        )
     with watch_tab:
-        _render_watchlist_panel(watch_monitor, lookup, account_value, settings, open_risk_pct)
+        _render_watchlist_panel(watch_monitor, lookup, account_value, settings, open_risk_pct, cash)
 
     _render_allocation_panel(monitor, etfs, settings)
     _render_risk_panel(monitor, lookup, account_value)
@@ -268,7 +270,7 @@ def _render_core_panel(monitor: pd.DataFrame) -> None:
 
 def _render_satellite_panel(
     monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings,
-    open_risk_pct: float = 0.0, earnings: set[str] | None = None,
+    open_risk_pct: float = 0.0, earnings: set[str] | None = None, cash: float | None = None,
 ) -> None:
     earnings = earnings or set()
     sat = monitor[~monitor['Sleeve'].map(is_core)]
@@ -286,7 +288,8 @@ def _render_satellite_panel(
         a = lookup.get(ticker, {})
         current_value = float(r['Value']) if pd.notna(r['Value']) else 0.0
         actionable = bool(a.get('Actionable', False))
-        sizing = add_sizing(account_value, settings, a, current_value, open_risk_pct)
+        sizing = add_sizing(account_value, settings, a, current_value, open_risk_pct,
+                            cash_available=cash)
         row = {
             'Ticker': ticker,
             'Account': r.get('Account'),
@@ -316,7 +319,7 @@ def _render_satellite_panel(
 
 def _render_watchlist_panel(
     watch_monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings,
-    open_risk_pct: float = 0.0,
+    open_risk_pct: float = 0.0, cash: float | None = None,
 ) -> None:
     st.caption('Names you follow (no positions). New-entry size assumes a fresh buy.')
     if watch_monitor is None or watch_monitor.empty:
@@ -327,7 +330,7 @@ def _render_watchlist_panel(
         ticker = str(r['Ticker'])
         a = lookup.get(ticker, {})
         actionable = bool(a.get('Actionable', False))
-        sizing = add_sizing(account_value, settings, a, 0.0, open_risk_pct)
+        sizing = add_sizing(account_value, settings, a, 0.0, open_risk_pct, cash_available=cash)
         rows.append({
             'Ticker': ticker,
             'Price': r['Price'],

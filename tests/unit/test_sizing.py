@@ -53,6 +53,31 @@ def test_invalid_stop_returns_none():
     assert suggest_add_size(100_000, 0.01, entry=90.0, stop=100.0) is None
 
 
+def test_cash_cap_limits_add():
+    # Risk/weight allow 100 shares ($10k), but only $2.5k cash -> 25 shares.
+    sizing = suggest_add_size(100_000, 0.01, entry=100.0, stop=90.0, cash_available=2_500.0)
+    assert sizing is not None
+    assert sizing.shares == 25
+    assert sizing.dollars == 2_500.0
+    assert sizing.capped_by == 'cash'
+
+
+def test_zero_cash_denies_add():
+    sizing = suggest_add_size(100_000, 0.01, entry=100.0, stop=90.0, cash_available=0.0)
+    assert sizing is not None
+    assert sizing.shares == 0
+    assert sizing.dollars == 0.0
+    assert sizing.capped_by == 'cash'
+
+
+def test_ample_cash_does_not_bind():
+    # Cash far exceeds the risk-based size, so risk remains the binding cap.
+    sizing = suggest_add_size(100_000, 0.01, entry=100.0, stop=90.0, cash_available=1_000_000.0)
+    assert sizing is not None
+    assert sizing.shares == 100
+    assert sizing.capped_by == 'risk'
+
+
 def test_non_positive_account_value_returns_none():
     assert suggest_add_size(0, 0.01, entry=100.0, stop=90.0) is None
     assert suggest_add_size(-5, 0.01, entry=100.0, stop=90.0) is None

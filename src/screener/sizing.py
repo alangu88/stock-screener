@@ -43,13 +43,15 @@ def suggest_add_size(
     *,
     current_value: float = 0.0,
     max_position_weight: float = 0.10,
+    cash_available: float | None = None,
 ) -> PositionSizing | None:
     """Suggest how many shares to add given a risk budget and weight cap.
 
     The base size risks ``account_value * risk_pct`` across the per-share risk
     ``entry - stop``. The result is then capped so the position's total value
     (``current_value`` plus the add) stays within ``max_position_weight`` of the
-    account.
+    account. When ``cash_available`` is given, the add is further capped so its
+    dollar cost never exceeds the cash on hand.
 
     Returns ``None`` when the inputs cannot produce a valid trade
     (``entry <= stop`` or ``account_value <= 0``).
@@ -71,6 +73,12 @@ def suggest_add_size(
     else:
         shares = round(max(risk_shares, 0.0), SHARE_PRECISION)
         capped_by = 'risk'
+
+    if cash_available is not None:
+        cash_shares = round(max(cash_available, 0.0) / entry, SHARE_PRECISION)
+        if cash_shares < shares:
+            shares = cash_shares
+            capped_by = 'cash'
 
     dollars = shares * entry
     risk_dollars = shares * per_share_risk

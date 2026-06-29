@@ -90,7 +90,11 @@ def render_recommendations(
     if not st.session_state.get('positions_risk_on', True):
         st.warning('Risk-off: SPY is below its 200-day — consider holding off on new adds.')
     current_values = _position_values(st.session_state.get('monitor_df'))
-    table = recommendation_rows(recs, account_value, settings, etfs, current_values, open_risk_pct)
+    portfolio_value = float(st.session_state.get('positions_portfolio_value', 0.0) or 0.0)
+    cash = max(account_value - portfolio_value, 0.0) if account_value > 0 else None
+    table = recommendation_rows(
+        recs, account_value, settings, etfs, current_values, open_risk_pct, cash_available=cash,
+    )
 
     at_cap, cap_note = _cap_state(settings)
     if at_cap:
