@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import pandas as pd
 
 from src.config import Settings
-from src.data.market import earnings_soon, regime_risk_on
+from src.data.market import earnings_soon, market_is_open, regime_risk_on
 
 SETTINGS = Settings()
+_ET = ZoneInfo('America/New_York')
 
 
 class _FakeClient:
@@ -32,6 +36,26 @@ def test_regime_risk_off_below_long_ma():
 
 def test_regime_fails_open_on_short_history():
     assert regime_risk_on(_FakeClient(spy_close=pd.Series([1.0, 2.0])), SETTINGS) is True
+
+
+def test_market_open_during_session():
+    # Wednesday 11:00 ET
+    assert market_is_open(datetime(2026, 6, 24, 11, 0, tzinfo=_ET)) is True
+
+
+def test_market_closed_before_open_and_after_close():
+    assert market_is_open(datetime(2026, 6, 24, 9, 0, tzinfo=_ET)) is False
+    assert market_is_open(datetime(2026, 6, 24, 16, 0, tzinfo=_ET)) is False
+
+
+def test_market_closed_on_weekend():
+    # Saturday midday
+    assert market_is_open(datetime(2026, 6, 27, 12, 0, tzinfo=_ET)) is False
+
+
+def test_market_open_uses_eastern_for_other_zones():
+    # 11:00 ET expressed in UTC (15:00) must still read as open.
+    assert market_is_open(datetime(2026, 6, 24, 15, 0, tzinfo=ZoneInfo('UTC'))) is True
 
 
 def test_earnings_soon_filters_window():

@@ -5,3 +5,4 @@ streamlit>=1.36.0,<2.0
 yfinance>=0.2.40,<2.0
 requests>=2.32.0,<3.0
 lxml>=6.0.0,<7.0
+tzdata>=2024.1
