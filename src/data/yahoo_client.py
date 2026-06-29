@@ -104,15 +104,18 @@ class YahooFinanceClient:
         if missing:
             batch_data = self._download_batch(missing, period=period, interval=interval)
             ttl_seconds = self.settings.cache_ttl_hours * 3600
-            for ticker, df in batch_data.items():
-                if df.empty:
+            for ticker in missing:
+                cache_key = f'history:{ticker}:{period}:{interval}'
+                df = batch_data.get(ticker)
+                if df is not None and not df.empty:
+                    result[ticker] = df
+                    self.cache.set(cache_key, df, ttl_seconds=ttl_seconds)
                     continue
-                result[ticker] = df
-                self.cache.set(
-                    f'history:{ticker}:{period}:{interval}',
-                    df,
-                    ttl_seconds=ttl_seconds,
-                )
+                # A failed (re)download falls back to any cached copy so a forced
+                # refresh that gets throttled never blanks out a held name.
+                cached = self.cache.get(cache_key)
+                if cached is not None:
+                    result[ticker] = cached
 
         return result
 

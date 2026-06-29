@@ -57,6 +57,19 @@ def test_force_refresh_redownloads_all(tmp_path):
     assert calls[-1] == ['AAA', 'BBB']
 
 
+def test_failed_refresh_falls_back_to_cache(tmp_path):
+    """A forced refresh that fails (e.g. throttled) keeps the stale cached copy."""
+    calls: list[list[str]] = []
+    prices = {'AAA': 1.0}
+    client = _client(tmp_path, prices, calls)
+    client.fetch_history(['AAA'])  # seed the cache
+
+    # Simulate a throttled download: the batch returns nothing.
+    client._download_batch = lambda tickers, period='2y', interval='1d': {}  # type: ignore[assignment]
+    out = client.fetch_history(['AAA'], refresh_tickers=['AAA'])
+    assert float(out['AAA']['Close'].iloc[-1]) == 1.0  # served stale, not dropped
+
+
 def test_fundamentals_cached_with_separate_long_ttl(monkeypatch):
     """Fundamentals must persist on their own (longer) TTL, not the price TTL."""
     captured: dict[str, int] = {}
