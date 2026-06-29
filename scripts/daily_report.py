@@ -440,49 +440,67 @@ def _holdings_section(
 def _scaleout_section(monitor: pd.DataFrame, lookup: dict, settings: Settings) -> str:
     """Profit-taking ladder for satellite holdings: scale out ⅓ at +2R and when extended.
 
-    Returns an empty string when no satellite holding has a usable level, so the
-    section is dropped entirely.
+    Rows are ordered by proximity to the nearest scale-out level (already-reached
+    levels first, then closest upcoming). A reached level is marked so it reads as
+    act-now. Returns an empty string when no satellite holding has a usable level.
     """
     show_acct = has_accounts(monitor)
 
-    def _sell_cell(shares: float, price: float | None) -> str:
-        if price is None or _isna(price):
-            return '\u2014'
-        third = shares / 3.0
-        return f'{_num(third, 3)} sh \u2248 {_money(third * float(price))}'
+    def _gap(price: float, level: float | None) -> float | None:
+        if level is None or _isna(level):
+            return None
+        return (float(level) - price) / price
 
-    rows = []
+    def _level_cell(price: float, shares: float, level: float | None) -> tuple[str, str]:
+        if level is None or _isna(level):
+            return '\u2014', '\u2014'
+        third = shares / 3.0
+        amt = f'{_num(third, 3)} sh \u2248 {_money(third * float(level))}'
+        if price >= float(level):  # already at/through the level -> act now
+            return f'{_money(level)} \u2705', f'now \u2014 {amt}'
+        return _money(level), amt
+
+    def _nearest_label(gap_2r: float | None, gap_ext: float | None) -> tuple[float, str]:
+        cands = [(g, lbl) for g, lbl in ((gap_2r, '+2R'), (gap_ext, 'extended')) if g is not None]
+        gap, lbl = min(cands, key=lambda kv: kv[0])  # most-passed / closest upcoming
+        return gap, (f'\u2705 {lbl} hit' if gap <= 0 else f'{_pct(gap)} to {lbl}')
+
+    entries = []
     for _, r in monitor.iterrows():
         if is_core(r['Sleeve']):
             continue
         shares = r.get('Shares')
-        if _isna(shares) or float(shares) <= 0:
+        price = r.get('Price')
+        if _isna(shares) or float(shares) <= 0 or _isna(price) or float(price) <= 0:
             continue
         a = lookup.get(str(r['Ticker']), {})
         plus2r = r_multiple_price(a.get('Entry'), a.get('Stop'), 2.0)
         ext = extended_price(r.get('EMA20'), settings)
         if plus2r is None and ext is None:
             continue
+        price = float(price)
+        shares = float(shares)
+        sort_gap, nearest_txt = _nearest_label(_gap(price, plus2r), _gap(price, ext))
+        p2_price, p2_sell = _level_cell(price, shares, plus2r)
+        ex_price, ex_sell = _level_cell(price, shares, ext)
         row = [str(r['Ticker'])]
         if show_acct:
             row.append(_text(r.get('Account')))
-        row += [
-            _num(shares, 3),
-            _money(plus2r) if plus2r is not None else '\u2014',
-            _sell_cell(float(shares), plus2r),
-            _money(ext) if ext is not None else '\u2014',
-            _sell_cell(float(shares), ext),
-        ]
-        rows.append(row)
-    if not rows:
+        row += [nearest_txt, _num(shares, 3), p2_price, p2_sell, ex_price, ex_sell]
+        entries.append((sort_gap, row))
+    if not entries:
         return ''
+    entries.sort(key=lambda kv: kv[0])  # nearest (or most-passed) first
+    rows = [row for _, row in entries]
     headers = ['Ticker']
     if show_acct:
         headers.append('Account')
-    headers += ['Shares', '+2R price', 'Sell \u2153 @ +2R', 'Extended price', 'Sell \u2153 @ ext']
+    headers += ['Nearest', 'Shares', '+2R price', 'Sell \u2153 @ +2R', 'Extended price',
+                'Sell \u2153 @ ext']
     note = _escape_dollars(
-        '\n\n_Swing scale-out ladder: sell \u2153 of the position when price reaches **+2R** '
-        '(twice your initial risk above entry) and another \u2153 once it runs **extended** '
+        '\n\n_Swing scale-out ladder, ordered by proximity to the next level (\u2705 = '
+        'reached, act now). Sell \u2153 of the position when price reaches **+2R** (twice your '
+        'initial risk above entry) and another \u2153 once it runs **extended** '
         f'({_pct(settings.swing_extended_atr)} above the 20-day EMA). Trail the remainder; '
         'sell the final \u2153 at the **Target**. Levels are estimates from current entry/stop '
         'and the 20-EMA._'

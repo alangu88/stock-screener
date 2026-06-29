@@ -90,3 +90,29 @@ def test_nearest_scaleout_picks_closer_level() -> None:
     near = dr._nearest_scaleout(row, analysis, Settings())
     assert near is not None
     assert near[0] == '+2R'
+
+
+def test_scaleout_section_orders_by_proximity_and_marks_reached() -> None:
+    monitor = pd.DataFrame([
+        # +2R at 105 (5% away); extended at 93.5 already passed -> nearest -6.5%
+        {'Ticker': 'AAA', 'Sleeve': 'Satellite', 'Shares': 3.0, 'Price': 100.0, 'EMA20': 85.0},
+        # +2R at 102 (2% away); extended far -> nearest +2%
+        {'Ticker': 'BBB', 'Sleeve': 'Satellite', 'Shares': 3.0, 'Price': 100.0, 'EMA20': 99.0},
+        # +2R at 105 (5% away); extended at 110 -> nearest +5%
+        {'Ticker': 'CCC', 'Sleeve': 'Satellite', 'Shares': 3.0, 'Price': 100.0, 'EMA20': 100.0},
+        {'Ticker': 'CORE', 'Sleeve': 'Core', 'Shares': 3.0, 'Price': 100.0, 'EMA20': 50.0},
+    ])
+    lookup = {
+        'AAA': {'Entry': 95.0, 'Stop': 90.0},
+        'BBB': {'Entry': 90.0, 'Stop': 84.0},
+        'CCC': {'Entry': 95.0, 'Stop': 90.0},
+        'CORE': {'Entry': 50.0, 'Stop': 40.0},
+    }
+    out = dr._scaleout_section(monitor, lookup, Settings())
+    assert 'CORE' not in out  # core holdings excluded
+    assert out.index('AAA') < out.index('BBB') < out.index('CCC')  # nearest first
+    aaa_line = next(ln for ln in out.splitlines() if ln.startswith('| AAA'))
+    assert '\u2705 extended hit' in aaa_line  # reached level flagged on the nearest cell
+    assert 'now \u2014' in aaa_line  # reached sell cell marked act-now
+    bbb_line = next(ln for ln in out.splitlines() if ln.startswith('| BBB'))
+    assert 'to +2R' in bbb_line
