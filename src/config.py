@@ -55,6 +55,7 @@ class Settings:
     swing_time_stop_bars: int = 20  # cut dead money if no progress within N bars
     swing_extended_atr: float = 0.10  # > this above EMA20 -> extended, scale partial
     earnings_blackout_days: int = 7  # flag holdings/adds within N days of earnings
+    dividend_lookback_days: int = 7  # first-run window for the income-to-reconcile digest
 
     def __post_init__(self) -> None:
         positive = {
@@ -74,6 +75,7 @@ class Settings:
             'rec_min_reward_risk': self.rec_min_reward_risk,
             'swing_time_stop_bars': self.swing_time_stop_bars,
             'earnings_blackout_days': self.earnings_blackout_days,
+            'dividend_lookback_days': self.dividend_lookback_days,
         }
         for name, value in positive.items():
             if value <= 0:
@@ -158,6 +160,7 @@ def load_settings() -> Settings:
         ('swing_time_stop_bars', 'SWING_TIME_STOP_BARS', int),
         ('swing_extended_atr', 'SWING_EXTENDED_ATR', float),
         ('earnings_blackout_days', 'EARNINGS_BLACKOUT_DAYS', int),
+        ('dividend_lookback_days', 'DIVIDEND_LOOKBACK_DAYS', int),
     )
 
     values = {}

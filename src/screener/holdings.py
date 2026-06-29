@@ -45,6 +45,10 @@ SLEEVES = (CORE, SATELLITE)
 # risk-based sizing, e.g. ``account_value = 100000``.
 ACCOUNT_VALUE_KEY = 'account_value'
 
+# Directive key carrying free cash (e.g. SPAXX) available for new buys. May appear
+# once per ``[Account]`` section; values are summed, e.g. ``cash = 7.18``.
+CASH_KEY = 'cash'
+
 MONITOR_COLUMNS = (
     'Ticker',
     'Account',
@@ -140,6 +144,8 @@ def parse_positions(text: str) -> list[PositionEntry]:
             current_account = line[1:-1].strip() or None
             continue
         if _is_account_value_line(line):
+            continue
+        if _is_cash_line(line):
             continue
         parts = [p for p in line.replace(',', ' ').replace('\t', ' ').split() if p]
         symbol = normalize_ticker(parts[0])
@@ -257,6 +263,26 @@ def parse_account_value(text: str) -> float | None:
     return None
 
 
+def parse_cash(text: str) -> float | None:
+    """Return total free cash from ``cash`` directives, if any are present.
+
+    A ``cash = N`` line may appear once per ``[Account]`` section (e.g. the SPAXX
+    balance in each Fidelity account); all such lines are summed into a single
+    total used for buy-sizing. ``$`` and thousands separators are tolerated, and
+    a single line may itself be a ``+``-separated sum. Returns ``None`` when no
+    ``cash`` directive exists so callers can fall back to inferring cash.
+    """
+    total = 0.0
+    found = False
+    for raw in text.splitlines():
+        line = raw.split('#', 1)[0].strip()
+        value = _directive_value(line, CASH_KEY)
+        if value is not None:
+            total += value
+            found = True
+    return total if found else None
+
+
 def merge_holdings(
     portfolio: list[PositionEntry],
     positions: list[PositionEntry],
@@ -335,12 +361,22 @@ def _is_account_value_line(line: str) -> bool:
     Detecting by key -- not by a parseable value -- means a malformed value never
     leaks through and gets mistaken for a ticker named ``ACCOUNT_VALUE``.
     """
+    return _is_directive_line(line, ACCOUNT_VALUE_KEY)
+
+
+def _is_cash_line(line: str) -> bool:
+    """True when a line is a ``cash`` directive (by key), valid or not."""
+    return _is_directive_line(line, CASH_KEY)
+
+
+def _is_directive_line(line: str, key: str) -> bool:
+    """True when ``line`` starts with ``key`` followed by ``=`` or ``:``."""
     if not line:
         return False
     low = line.lower()
-    if not low.startswith(ACCOUNT_VALUE_KEY):
+    if not low.startswith(key):
         return False
-    rest = line[len(ACCOUNT_VALUE_KEY):].lstrip()
+    rest = line[len(key):].lstrip()
     return rest[:1] in ('=', ':')
 
 
@@ -352,9 +388,19 @@ def _account_value_directive(line: str) -> float | None:
     ``$`` and thousands separators are tolerated. Returns ``None`` if the line is
     not a directive or no term parses.
     """
-    if not _is_account_value_line(line):
+    return _directive_value(line, ACCOUNT_VALUE_KEY)
+
+
+def _directive_value(line: str, key: str) -> float | None:
+    """Parse a ``<key> = N`` directive line, else ``None``.
+
+    The value may be a single number or a sum of ``+``-separated numbers. ``$``
+    and thousands separators are tolerated. Returns ``None`` if the line is not a
+    directive for ``key`` or no term parses.
+    """
+    if not _is_directive_line(line, key):
         return None
-    rest = line[len(ACCOUNT_VALUE_KEY):].lstrip()[1:].strip()
+    rest = line[len(key):].lstrip()[1:].strip()
     terms = [_to_float(term) for term in rest.split('+')]
     valid = [t for t in terms if t is not None]
     if not valid:

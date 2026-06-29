@@ -23,6 +23,7 @@ def test_defaults_are_valid() -> None:
         ('rsi_period', -1),
         ('rec_min_reward_risk', 0.0),
         ('fundamentals_ttl_hours', 0),
+        ('dividend_lookback_days', 0),
     ],
 )
 def test_non_positive_fields_rejected(field: str, value: object) -> None:

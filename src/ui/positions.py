@@ -35,6 +35,7 @@ from src.screener.holdings import (
     has_accounts,
     merge_holdings,
     parse_account_value,
+    parse_cash,
     parse_portfolio,
     parse_positions,
 )
@@ -126,8 +127,9 @@ def _render_inputs() -> float:
             'Position sizes',
             key='positions_input',
             height=200,
-            help='TICKER, cost_basis, shares per line; [Account] sections and an '
-                 '"account_value = N" directive are supported. Kept private (git-ignored).',
+            help='TICKER, cost_basis, shares per line; [Account] sections and '
+                 '"cash = N" / "account_value = N" directives are supported. '
+                 'Kept private (git-ignored).',
         )
         col_save, col_reload = st.columns([1, 1])
         with col_save:
@@ -147,16 +149,22 @@ def _render_inputs() -> float:
 
     text = st.session_state['positions_input']
     directive_value = parse_account_value(text)
+    cash_value = parse_cash(text)
     fallback_value = float(st.session_state.get('positions_portfolio_value', 0.0) or 0.0)
-    default_value = float(directive_value) if directive_value else fallback_value
+    if cash_value is not None:
+        default_value = fallback_value + cash_value
+    elif directive_value:
+        default_value = float(directive_value)
+    else:
+        default_value = fallback_value
     return st.number_input(
         'Account value ($)',
         min_value=0.0,
         value=default_value,
         step=1000.0,
-        help='Drives 1%-risk add sizing and allocation. Prefilled from the '
-             '"account_value" directive in positions.txt (falls back to your total '
-             'position value); override here if needed.',
+        help='Drives 1%-risk add sizing and allocation. Prefilled from your '
+             '"cash" directive(s) plus current holdings (or an "account_value" '
+             'directive); override here if needed.',
     )
 
 

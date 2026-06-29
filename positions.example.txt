@@ -16,16 +16,21 @@
 # (TICKER, price, shares). Shares are summed and the entry price becomes the
 # share-weighted average cost basis.
 #
-# Set your total account value for risk-based add sizing (1% risk per trade):
-account_value = 100000
+# Free cash (e.g. a SPAXX money-market balance) available for new buys. Add one
+# "cash = N" line per account; the totals are summed and your account value is
+# computed as current holdings + cash. This keeps buy sizing capped to what you
+# can actually spend. (Alternatively, set a single "account_value = N" total and
+# cash is inferred as account_value minus holdings.)
 
 [Taxable]
+cash = 2500
 VTI, 240.00, 120
 FSELX, 30.50, 200
 AAPL, 150, 10
 AAPL, 170, 20        # -> 30 sh @ 163.33 average cost
 
 [Roth IRA]
+cash = 1500
 VTI, 240.00, 40
 NVDA, 95.20, 100
 

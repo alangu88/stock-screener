@@ -57,8 +57,16 @@ from src.screener.holdings import (  # noqa: E402
     has_accounts,
     merge_holdings,
     parse_account_value,
+    parse_cash,
     parse_portfolio,
     parse_positions,
+)
+from src.screener.income import (  # noqa: E402
+    IncomeEvent,
+    collect_income,
+    income_by_account,
+    load_ledger,
+    save_ledger,
 )
 from src.screener.portfolio import PortfolioConfig  # noqa: E402
 from src.screener.strategy import StrategyConfig  # noqa: E402
@@ -69,6 +77,7 @@ POSITIONS_FILE = _REPO_ROOT / 'positions.txt'
 WATCHLIST_FILE = _REPO_ROOT / 'watchlist.txt'
 REPORTS_DIR = _REPO_ROOT / 'reports'
 REPORT_PATH = REPORTS_DIR / 'daily_report.md'
+INCOME_LEDGER_PATH = REPORTS_DIR / '.income_ledger.json'
 
 HISTORY_PERIOD = '2y'
 FUND_QUOTE_TYPES = {'ETF', 'MUTUALFUND'}
@@ -577,6 +586,7 @@ def _build_report(
     exposure: tuple[list, float] = ([], 0.0),
     risk_on: bool = True,
     earnings: set[str] | None = None,
+    income: list[IncomeEvent] | None = None,
 ) -> str:
     lookup = analysis_lookup(analysis)
     context = _market_context(analysis, recs)
@@ -587,7 +597,10 @@ def _build_report(
         for _, r in monitor.iterrows()
         if not _isna(r.get('Value'))
     }
-    cash = max(account_value - sum(held_values.values()), 0.0)
+    # Sum the full monitor (not the ticker-keyed dict, which collapses a ticker
+    # held in two accounts) so cash matches account_value - holdings exactly.
+    total_held = float(monitor['Value'].dropna().sum())
+    cash = max(account_value - total_held, 0.0)
     sections = [
         f'# Daily Position Report\n\n_Generated {generated_at}. Market context: {context}. '
         f'Regime: {"Risk-On" if risk_on else "Risk-Off"}._',
@@ -597,6 +610,7 @@ def _build_report(
             monitor, watch_monitor, lookup, recs, account_value, settings, risk_on, open_risk_pct,
             earnings, cash,
         ),
+        _income_section(income),
         _holdings_section(monitor, lookup, account_value, settings, open_risk_pct, cash),
         _watchlist_section(watch_monitor, lookup, account_value, settings, open_risk_pct, cash),
         _recommendations_section(
@@ -607,7 +621,31 @@ def _build_report(
     exposure_section = _exposure_section(exposures, tail_value, account_value)
     if exposure_section:
         sections.append(exposure_section)
-    return '\n\n'.join(sections) + '\n'
+    return '\n\n'.join(s for s in sections if s) + '\n'
+
+
+def _income_section(income: list[IncomeEvent] | None) -> str:
+    """Prompt to reconcile recent dividends / fund capital-gains into cash.
+
+    Empty string when there is nothing new, so the section is dropped entirely.
+    """
+    if not income:
+        return ''
+    lines = [
+        '## Income to reconcile',
+        '',
+        '_Distributions with ex-dates since your last report. Add each total to '
+        'the matching `cash` line in positions.txt (estimates \u2014 confirm against '
+        'your broker)._',
+    ]
+    for account, total, events in income_by_account(income):
+        detail = '; '.join(
+            f'{e.ticker} {e.kind.lower()} {_money(e.per_share)}/sh \u00d7 {_num(e.shares, 3)} = '
+            f'{_money(e.amount)} ({e.ex_date.strftime("%b %d")})'
+            for e in events
+        )
+        lines.append(f'- **{_text(account)}** \u2014 add \u2248 {_money(total)}: {detail}')
+    return '\n'.join(lines)
 
 
 def _build_unavailable(generated_at: str, reason: str) -> str:
@@ -649,7 +687,14 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
     history = client.fetch_history(universe, period=HISTORY_PERIOD, refresh_tickers=refresh)
     monitor = build_monitor(merged, history, settings)
     watch_monitor = build_monitor([PositionEntry(t, sleeve=SATELLITE) for t in watch], history, settings)
-    account_value = parse_account_value(positions_text) or float(monitor['Value'].dropna().sum())
+    held_value = float(monitor['Value'].dropna().sum())
+    explicit_cash = parse_cash(positions_text)
+    if explicit_cash is not None:
+        # Cash (e.g. SPAXX) is tracked directly, so account value is current
+        # holdings plus that cash -- no stale cost-basis seeding to drift from.
+        account_value = held_value + explicit_cash
+    else:
+        account_value = parse_account_value(positions_text) or held_value
 
     gate_config = FilterConfig(
         min_confidence=settings.rec_min_confidence,
@@ -661,6 +706,14 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
     recs = _screen_recommendations(engine, cache, watch, gate_config)
     rec_etfs = _etf_tickers(client, list(recs['Ticker'])) if not recs.empty else set()
     auto_added = _auto_add_to_watchlist(recs, held, rec_etfs, settings)
+
+    ledger = load_ledger(INCOME_LEDGER_PATH)
+    income, ledger = collect_income(
+        merged, history, ledger,
+        today=datetime.now(UTC).date(),
+        lookback_days=settings.dividend_lookback_days,
+    )
+    save_ledger(INCOME_LEDGER_PATH, ledger)
 
     report = _build_report(
         generated_at=generated_at,
@@ -675,6 +728,7 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
         exposure=_build_exposure(client, monitor, etfs, account_value, analysis),
         risk_on=regime_risk_on(client, settings),
         earnings=earnings_soon(client, held, settings.earnings_blackout_days),
+        income=income,
     )
     status = (f'{len(monitor)} holding(s), {len(watch_monitor)} watch, '
               f'{len(recs)} recommendation(s).')

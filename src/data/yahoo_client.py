@@ -131,6 +131,7 @@ class YahooFinanceClient:
                 period=period,
                 interval=interval,
                 auto_adjust=False,
+                actions=True,
                 progress=False,
                 threads=True,
                 group_by='ticker',

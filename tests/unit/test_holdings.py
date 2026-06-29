@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.config import Settings
 from src.screener.holdings import (
@@ -17,6 +18,7 @@ from src.screener.holdings import (
     has_accounts,
     merge_holdings,
     parse_account_value,
+    parse_cash,
     parse_portfolio,
     parse_positions,
 )
@@ -285,6 +287,29 @@ def test_account_value_line_never_becomes_a_ticker():
     entries = parse_positions('account_value = 10 +\nAAPL\n')
     tickers = [e.ticker for e in entries]
     assert 'ACCOUNT_VALUE' not in tickers
+    assert tickers == ['AAPL']
+
+
+def test_parse_cash_sums_per_account_directives():
+    text = (
+        '[Taxable]\ncash = 7.18\nVTI, 240, 10\n'
+        '[Roth IRA]\ncash = 624.86\nNVDA, 95, 5\n'
+    )
+    assert parse_cash(text) == pytest.approx(632.04)
+
+
+def test_parse_cash_absent_returns_none():
+    assert parse_cash('account_value = 100000\nAAPL, 150, 10\n') is None
+
+
+def test_parse_cash_tolerates_currency_and_sums():
+    assert parse_cash('cash: $1,000 + 250') == 1250.0
+
+
+def test_parse_positions_skips_cash_directive():
+    entries = parse_positions('[Taxable]\ncash = 500\nAAPL, 150, 10\n')
+    tickers = [e.ticker for e in entries]
+    assert 'CASH' not in tickers
     assert tickers == ['AAPL']
 
 

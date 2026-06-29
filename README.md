@@ -298,7 +298,7 @@ privacy-preserving two-file model:
 | File | Committed? | Contents |
 | --- | --- | --- |
 | `portfolio.txt` | Yes | Composition only — `[Account]` sections with `TICKER, core|satellite` lines. No sizes. |
-| `positions.txt` | **No** (git-ignored) | Private sizes — `[Account]` sections with `TICKER, cost_basis, shares` lines, plus an `account_value = NNNNN` directive. Copy `positions.example.txt` to start. |
+| `positions.txt` | **No** (git-ignored) | Private sizes — `[Account]` sections with `TICKER, cost_basis, shares` lines, plus a `cash = NNNN` directive per account (or a single `account_value = NNNNN`). Copy `positions.example.txt` to start. |
 | `watchlist.txt` | Yes | Tickers you follow but do not hold. |
 | `reports/daily_report.md` | **No** (git-ignored) | Latest generated report (overwritten each run). |
 
@@ -306,8 +306,21 @@ The app **merges** the two files at runtime: sleeve and membership come from the
 committed `portfolio.txt`, while share counts and cost basis stay in the private
 `positions.txt`, so your real sizes never get committed. The **Publish
 composition** button regenerates `portfolio.txt` from your current holdings
-(tickers + sleeve only). The `account_value` directive supports `+`-separated
-sums, e.g. `account_value = 2310.60 + 5269.23`.
+(tickers + sleeve only). Add a `cash = NNNN` line per `[Account]` for free cash
+(e.g. SPAXX); the totals are summed and your **account value = current holdings +
+cash**, which keeps buy sizing capped to what you can actually spend. As an
+alternative, set a single `account_value` total directly; it supports
+`+`-separated sums, e.g. `account_value = 2310.60 + 5269.23`, and cash is then
+inferred as account value minus holdings.
+
+The daily report (`scripts/daily_report.py`) adds an **Income to reconcile**
+digest: dividends and fund capital-gains distributions are read from the
+(already batched) price history at no extra request cost, multiplied by your
+held shares, and grouped per account so you can top up the right `cash` line.
+A git-ignored watermark (`reports/.income_ledger.json`) surfaces each ex-date
+exactly once; `SCREENER_DIVIDEND_LOOKBACK_DAYS` (default 7) bounds the first run.
+Estimates are informational — your broker's cash remains the source of truth, so
+nothing is credited automatically.
 
 Position sizing uses **1% account risk per trade** (`SCREENER_RISK_PER_TRADE`),
 capped by the per-name weight limit. Core allocation targets **60–70%**
