@@ -109,6 +109,16 @@ def _text(value) -> str:
     return _fmt_text(value)
 
 
+def _escape_dollars(text: str) -> str:
+    r"""Escape ``$`` as ``\$`` so prose with money is not parsed as KaTeX math.
+
+    Markdown renderers (GitHub, VS Code) treat a pair of ``$`` on one line as a
+    math span, which mangles lines that quote two or more dollar amounts. Tables
+    are left untouched (their cells render fine); only free-text sections use it.
+    """
+    return text.replace('$', r'\$')
+
+
 def _md_table(headers: list[str], rows: list[list[str]]) -> str:
     return _fmt_table(headers, rows)
 
@@ -286,7 +296,7 @@ def _action_plan_section(
     lines.append('- **Sell/Cut**: ' + ('; '.join(sells) if sells else 'none'))
     lines.append('- **Trim/Take profit**: ' + ('; '.join(trims) if trims else 'none'))
     lines.append('- **Buy**: ' + buy_text)
-    return '\n'.join(lines)
+    return _escape_dollars('\n'.join(lines))
 
 
 def _legend_section(settings: Settings) -> str:
@@ -460,7 +470,7 @@ def _recommendations_section(
         ])
     note = ''
     if cash is not None:
-        note = (
+        note = _escape_dollars(
             f'\n\n_Add sizes are capped to your {_money(max(cash, 0.0))} cash on hand; '
             'amounts are per-name, so you cannot take every add at once. **Add $** is the '
             'starter tranche (Suggested add \u00d7 price)._'
@@ -571,7 +581,9 @@ def _concentration_section(
             pnl = sub['Unreal P&L $'].dropna()
             value = _money(float(held.sum())) if not held.empty else '\u2014'
             pnl_txt = _money(float(pnl.sum())) if not pnl.empty else '\u2014'
-            lines.append(f'- {label}: {len(sub)} position(s), value {value}, P&L {pnl_txt}')
+            lines.append(_escape_dollars(
+                f'- {label}: {len(sub)} position(s), value {value}, P&L {pnl_txt}'
+            ))
     rotation = rotation_candidates(monitor, analysis, etfs)
     if not rotation.empty:
         lines.append('')
