@@ -76,8 +76,15 @@ class StrategyConfig:
     min_confidence: float = 45.0
     min_avg_volume: int = 500_000
 
+    def __post_init__(self) -> None:
+        total = sum(self.confidence_weights.values())
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(f'confidence weights must sum to 1, got {total:.4f}')
+
     @classmethod
     def from_settings(cls, settings: Settings) -> StrategyConfig:
+        # Only data/liquidity windows track Settings; the remaining thresholds are
+        # fixed methodology (tune them here, not via env) to keep backtests stable.
         return cls(
             ma_fast=settings.sma_short_window,
             ma_long=settings.sma_long_window,

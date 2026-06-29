@@ -198,6 +198,40 @@ class YahooFinanceClient:
         self.cache.set(f'fundamentals:{ticker}', entry.__dict__, ttl_seconds=self.settings.cache_ttl_hours * 3600)
         return entry
 
+    def fetch_earnings_dates(self, tickers: list[str], force_refresh: bool = False) -> dict[str, str]:
+        """Next earnings date (string) per ticker; best-effort, cached, missing skipped."""
+        output: dict[str, str] = {}
+        for ticker in sorted(set(tickers)):
+            cache_key = f'earnings:{ticker}'
+            if not force_refresh:
+                cached = self.cache.get(cache_key)
+                if cached is not None:
+                    if cached.get('date'):
+                        output[ticker] = cached['date']
+                    continue
+            date = self._fetch_one_earnings(ticker)
+            self.cache.set(cache_key, {'date': date}, ttl_seconds=self.settings.cache_ttl_hours * 3600)
+            if date:
+                output[ticker] = date
+        return output
+
+    def _fetch_one_earnings(self, ticker: str) -> str | None:
+        try:
+            cal = self._with_retry(
+                lambda t=ticker: yf.Ticker(t).calendar,
+                operation=f'fetch earnings {ticker}',
+            )
+        except DataFetchError as exc:
+            self.logger.warning('Skipping earnings for %s: %s', ticker, exc)
+            return None
+        if not cal:
+            return None
+        dates = cal.get('Earnings Date') if isinstance(cal, dict) else None
+        if not dates:
+            return None
+        first = dates[0] if isinstance(dates, (list, tuple)) else dates
+        return str(first)
+
     def filter_allowed_exchanges(
         self, fundamentals: dict[str, Fundamentals]
     ) -> tuple[list[str], list[str]]:

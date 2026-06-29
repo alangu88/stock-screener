@@ -35,17 +35,64 @@ def analysis_lookup(analysis: pd.DataFrame) -> dict[str, dict]:
     return {str(row['Ticker']): row.to_dict() for _, row in analysis.iterrows()}
 
 
+def portfolio_open_risk(monitor: pd.DataFrame, lookup: dict, account_value: float) -> tuple[float, float]:
+    """Aggregate satellite open risk (dollars above stops) and fraction of account.
+
+    Core sleeves are excluded; rows below their stop contribute nothing. Returns
+    ``(0.0, 0.0)`` when there is no account value to measure against.
+    """
+    if monitor is None or 'Sleeve' not in monitor.columns or account_value <= 0:
+        return 0.0, 0.0
+    total = 0.0
+    for _, r in monitor.iterrows():
+        if is_core(r['Sleeve']):
+            continue
+        shares, price = r.get('Shares'), r.get('Price')
+        stop = lookup.get(str(r['Ticker']), {}).get('Stop')
+        if not _isna(shares) and not _isna(price) and not _isna(stop) and float(price) > float(stop):
+            total += float(shares) * (float(price) - float(stop))
+    return total, total / account_value
+
+
+def _conviction_risk(settings: Settings, confidence) -> float:
+    """Scale risk from base toward the 2% cap as confidence climbs to 100.
+
+    At the recommendation gate the base ``risk_per_trade`` applies; the highest
+    convictions earn up to ``conviction_risk_max`` (hard cap). Missing or low
+    confidence falls back to the base risk.
+    """
+    base = settings.risk_per_trade
+    cap = settings.conviction_risk_max
+    if _isna(confidence):
+        return base
+    gate = settings.rec_min_confidence
+    span = max(100.0 - gate, 1.0)
+    frac = max(0.0, min(1.0, (float(confidence) - gate) / span))
+    return min(cap, base + frac * (cap - base))
+
+
 def add_sizing(
-    account_value: float, settings: Settings, row: dict, current_value: float
+    account_value: float, settings: Settings, row: dict, current_value: float,
+    open_risk_pct: float = 0.0,
 ) -> PositionSizing | None:
-    """Risk-based add size for a plan row, or ``None`` when it cannot be sized."""
+    """Risk-based add size for a plan row, or ``None`` when it cannot be sized.
+
+    ``open_risk_pct`` is the portfolio's aggregate open risk (stop distance) as a
+    fraction of the account. The per-trade risk is trimmed to whatever headroom
+    remains under ``max_portfolio_risk``; with no headroom left the add is denied.
+    """
     entry = row.get('Entry')
     stop = row.get('Stop')
     if account_value <= 0 or _isna(entry) or _isna(stop):
         return None
+    risk = _conviction_risk(settings, row.get('Confidence'))
+    headroom = settings.max_portfolio_risk - max(open_risk_pct, 0.0)
+    if headroom <= 0:
+        return None
+    risk = min(risk, headroom)
     return suggest_add_size(
         account_value,
-        settings.risk_per_trade,
+        risk,
         float(entry),
         float(stop),
         current_value=float(current_value),
@@ -53,22 +100,107 @@ def add_sizing(
     )
 
 
-def satellite_action(monitor_row, analysis_row: dict, sizing, actionable: bool) -> str:
-    """Descriptive next-step hint for a satellite holding (priority-ordered)."""
+def satellite_action(
+    monitor_row, analysis_row: dict, sizing, actionable: bool, settings: Settings | None = None
+) -> str:
+    """Descriptive next-step hint for a satellite holding (priority-ordered).
+
+    When ``settings.swing_mode`` is on, use explicit swing verbs (Cut / Take
+    profit / Trail). Otherwise fall back to the long-only Hold/Trim hints.
+    """
+    if settings is not None and settings.swing_mode:
+        return swing_satellite_action(monitor_row, analysis_row, sizing, actionable, settings)
     price = monitor_row.get('Price')
     stop = analysis_row.get('Stop')
     vs_sma200 = monitor_row.get('% vs SMA200')
     vs_ema20 = monitor_row.get('% vs EMA20')
     if not _isna(price) and not _isna(stop) and float(price) < float(stop):
-        return 'Exit \u2014 price below stop'
+        return 'Exit \u2014 price below stop' + _trim_hint(monitor_row, 1.0)
     if not _isna(vs_sma200) and float(vs_sma200) < 0:
-        return 'Trim \u2014 below 200-day trend'
+        return 'Trim \u2014 below 200-day trend' + _trim_hint(monitor_row, 1 / 3)
     if actionable and sizing is not None and sizing.shares > 0:
         entry = analysis_row.get('Entry')
         return f'Add near ${float(entry):,.2f}' if not _isna(entry) else 'Add to position'
     if not _isna(vs_ema20) and float(vs_ema20) > 0.10:
         return 'Hold \u2014 extended, await pullback'
     return 'Hold \u2014 trend intact'
+
+
+def swing_satellite_action(
+    monitor_row, analysis_row: dict, sizing, actionable: bool, settings: Settings
+) -> str:
+    """Explicit swing-trading verbs for a satellite holding (priority-ordered).
+
+    Mirrors the best-backtested exit ladder: cut below stop, take profit at
+    target, scale 1/3 at +2R, trail to breakeven once +1R, cut broken trend.
+    """
+    price = monitor_row.get('Price')
+    stop = analysis_row.get('Stop')
+    target = analysis_row.get('Target')
+    entry = analysis_row.get('Entry')
+    vs_sma200 = monitor_row.get('% vs SMA200')
+    vs_ema20 = monitor_row.get('% vs EMA20')
+    pnl = monitor_row.get('Unreal P&L %')
+    in_profit = not _isna(pnl) and float(pnl) > 0
+    r_mult = open_r_multiple(price, entry, stop)
+    if not _isna(price) and not _isna(stop) and float(price) < float(stop):
+        return 'Cut \u2014 stop hit' + _trim_hint(monitor_row, 1.0)
+    if not _isna(price) and not _isna(target) and float(price) >= float(target):
+        return 'Take profit \u2014 sell \u2153 at target' + _trim_hint(monitor_row, 1 / 3)
+    if not _isna(vs_sma200) and float(vs_sma200) < 0:
+        return 'Cut \u2014 trend broken below 200-day' + _trim_hint(monitor_row, 1.0)
+    if r_mult is not None and r_mult >= 2.0:
+        return 'Take profit \u2014 +2R, scale out \u2153' + _trim_hint(monitor_row, 1 / 3)
+    if in_profit and not _isna(vs_ema20) and float(vs_ema20) > settings.swing_extended_atr:
+        return 'Take profit \u2014 extended, scale out \u2153' + _trim_hint(monitor_row, 1 / 3)
+    if actionable and sizing is not None and sizing.shares > 0:
+        entry = analysis_row.get('Entry')
+        return f'Add near ${float(entry):,.2f}' if not _isna(entry) else 'Add to position'
+    if r_mult is not None and r_mult >= 1.0:
+        return 'Trail \u2014 stop to breakeven'
+    if in_profit:
+        return 'Trail \u2014 let it run'
+    return 'Hold \u2014 trend intact'
+
+
+def _trim_hint(monitor_row, frac: float) -> str:
+    """Append a concrete sell size: ' (sell N sh \u2248 $V)' for fraction ``frac``."""
+    shares = monitor_row.get('Shares')
+    value = monitor_row.get('Value')
+    if _isna(shares) or float(shares) <= 0:
+        return ''
+    sell_sh = float(shares) * frac
+    sh_txt = f'{sell_sh:,.0f}' if sell_sh >= 1 else f'{sell_sh:,.3f}'
+    if not _isna(value) and float(value) > 0:
+        return f' (sell {sh_txt} sh \u2248 ${float(value) * frac:,.0f})'
+    return f' (sell {sh_txt} sh)'
+
+
+
+def open_r_multiple(price, entry, stop) -> float | None:
+    """Open gain in R-multiples: (price - entry) / (entry - stop), or None."""
+    if _isna(price) or _isna(entry) or _isna(stop):
+        return None
+    risk = float(entry) - float(stop)
+    if risk <= 0:
+        return None
+    return (float(price) - float(entry)) / risk
+
+
+
+def pct_to_stop(price, stop) -> float | None:
+    """Downside cushion: pct above stop (negative once price is below stop)."""
+    if _isna(price) or _isna(stop) or float(price) <= 0:
+        return None
+    return (float(price) - float(stop)) / float(price)
+
+
+def pct_to_target(price, target) -> float | None:
+    """Upside remaining: pct gap up to target (negative once at/over target)."""
+    if _isna(price) or _isna(target) or float(price) <= 0:
+        return None
+    return (float(target) - float(price)) / float(price)
+
 
 
 def core_action(monitor_row) -> str:
@@ -99,6 +231,7 @@ def recommendation_rows(
     settings: Settings,
     etfs: set,
     current_values: dict[str, float] | None = None,
+    open_risk_pct: float = 0.0,
 ) -> pd.DataFrame:
     """Build the Recommended Adds display rows (numeric; formatting is caller's job).
 
@@ -111,7 +244,8 @@ def recommendation_rows(
     for _, r in recs.iterrows():
         ticker = str(r['Ticker'])
         sizing = add_sizing(
-            account_value, settings, r.to_dict(), current_value=current_values.get(ticker, 0.0)
+            account_value, settings, r.to_dict(),
+            current_value=current_values.get(ticker, 0.0), open_risk_pct=open_risk_pct,
         )
         rows.append({
             'Ticker': ticker,

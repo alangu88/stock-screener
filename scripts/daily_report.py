@@ -25,17 +25,22 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.config import Settings, load_settings  # noqa: E402
 from src.data.cache import SQLiteCache  # noqa: E402
+from src.data.market import earnings_soon, regime_risk_on  # noqa: E402
 from src.data.universe import UniverseResult, load_sp500_universe  # noqa: E402
 from src.data.yahoo_client import YahooFinanceClient  # noqa: E402
 from src.export.markdown_format import number as _fmt_number  # noqa: E402
 from src.export.markdown_format import table as _fmt_table  # noqa: E402
 from src.export.markdown_format import text as _fmt_text  # noqa: E402
 from src.screener.advisor import (  # noqa: E402
+    _isna,
     add_sizing,
     analysis_lookup,
     core_action,
     core_rebalance,
     is_core,
+    open_r_multiple,
+    pct_to_stop,
+    portfolio_open_risk,
     rotation_candidates,
     satellite_action,
 )
@@ -73,13 +78,6 @@ _LOGGER = get_logger('daily_report')
 # --------------------------------------------------------------------------- #
 # Formatting helpers (pure, no Streamlit).
 # --------------------------------------------------------------------------- #
-def _isna(value) -> bool:
-    try:
-        return value is None or pd.isna(value)
-    except (TypeError, ValueError):
-        return value is None
-
-
 def _money(value) -> str:
     return _fmt_number(value, ',.2f', prefix='$')
 
@@ -111,7 +109,7 @@ def _read(path: Path) -> str:
     return path.read_text(encoding='utf-8') if path.exists() else ''
 
 
-def _watchlist_tickers() -> list[str]:
+def _followed_tickers() -> list[str]:
     return [e.ticker for e in parse_portfolio(_read(WATCHLIST_FILE))]
 
 
@@ -161,21 +159,71 @@ def _snapshot_section(
         )
         lines.append(f'- Satellite allocation: {_pct(alloc.satellite_pct)}')
 
-    open_risk = 0.0
-    for _, r in monitor.iterrows():
-        if is_core(r['Sleeve']):
-            continue
-        shares, price = r.get('Shares'), r.get('Price')
-        stop = lookup.get(str(r['Ticker']), {}).get('Stop')
-        if not _isna(shares) and not _isna(price) and not _isna(stop) and float(price) > float(stop):
-            open_risk += float(shares) * (float(price) - float(stop))
-    risk_pct = open_risk / account_value if account_value > 0 else None
+    open_risk, risk_pct = portfolio_open_risk(monitor, lookup, account_value)
     lines.append(f'- Open risk (satellite stops): {_money(open_risk)} ({_pct(risk_pct)} of account)')
+    headroom = max(settings.max_portfolio_risk - risk_pct, 0.0)
+    lines.append(
+        f'- Risk headroom: {_pct(headroom)} of {_pct(settings.max_portfolio_risk)} cap'
+        + ('  — ⚠️ at cap, adds paused' if headroom <= 0 else '')
+    )
+    cash = account_value - total_value
+    if account_value > 0:
+        lines.append(f'- Cash: {_money(max(cash, 0.0))} ({_pct(max(cash, 0.0) / account_value)})')
 
     count = count_individual_stocks(monitor, etfs)
     cap = settings.max_individual_stocks
     flag = ' \u26a0\ufe0f over cap' if count > cap else (' (approaching cap)' if count >= cap - 2 else '')
     lines.append(f'- Individual stocks: {count} / {cap}{flag}')
+    return '\n'.join(lines)
+
+
+def _action_plan_section(
+    monitor: pd.DataFrame,
+    watch_monitor: pd.DataFrame,
+    lookup: dict,
+    recs: pd.DataFrame,
+    account_value: float,
+    settings: Settings,
+    risk_on: bool = True,
+    open_risk_pct: float = 0.0,
+    earnings: set[str] | None = None,
+) -> str:
+    """Plain-language buy / trim / sell plan for today, sorted by urgency."""
+    earnings = earnings or set()
+    buys: list[str] = []
+    trims: list[str] = []
+    sells: list[str] = []
+
+    # Holdings -> sell / trim using the same per-row action.
+    for _, r in monitor.iterrows():
+        ticker = str(r['Ticker'])
+        a = lookup.get(ticker, {})
+        if is_core(r['Sleeve']):
+            continue
+        sizing = add_sizing(account_value, settings, a, float(r.get('Value') or 0.0), open_risk_pct)
+        action = satellite_action(r, a, sizing, bool(a.get('Actionable', False)), settings)
+        if action.startswith(('Exit', 'Cut')):
+            sells.append(f'\U0001f534 {ticker} \u2014 {action}')
+        elif action.startswith(('Trim', 'Take profit')):
+            trims.append(f'\U0001f7e1 {ticker} \u2014 {action}')
+
+    # Recommended adds -> buys (suppressed when the market regime is risk-off).
+    if risk_on and recs is not None and not recs.empty:
+        for _, r in recs.head(5).iterrows():
+            tag = ' \u26a0\ufe0f earnings soon' if str(r['Ticker']) in earnings else ''
+            buys.append(
+                f"\U0001f7e2 {r['Ticker']} \u2014 {_text(r.get('Setup'))} near {_money(r.get('Entry'))} "
+                f"(R/R {_num(r.get('R/R'))}, conf {_int(r.get('Confidence'))}){tag}"
+            )
+
+    if not risk_on:
+        buy_text = 'paused \u2014 SPY below 200-day (risk-off regime)'
+    else:
+        buy_text = '; '.join(buys) if buys else 'nothing new \u2014 sit tight'
+    lines = ['## Today\u2019s plan', '']
+    lines.append('- **Sell/Cut**: ' + ('; '.join(sells) if sells else 'none'))
+    lines.append('- **Trim/Take profit**: ' + ('; '.join(trims) if trims else 'none'))
+    lines.append('- **Buy**: ' + buy_text)
     return '\n'.join(lines)
 
 
@@ -196,20 +244,23 @@ def _legend_section(settings: Settings) -> str:
         'tactical position managed with the trade plan.\n'
         '- **% vs 200d** \u2014 distance above/below the 200-day average; the primary trend gauge. '
         'Negative means the long-term trend has rolled over.\n'
+        '- **R now** \u2014 open gain in R-multiples ((price\u2212entry)/(entry\u2212stop)); +1 means up one '
+        'unit of risk. **% to stop** is the cushion before the exit triggers.\n'
         '- **Action** \u2014 the suggested next step for that row, in plain language.'
     )
 
 
 def _holdings_section(
-    monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings
+    monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings,
+    open_risk_pct: float = 0.0,
 ) -> str:
     """One consistent table for every holding (core first, then by weight)."""
     show_acct = has_accounts(monitor)
     headers = ['Ticker']
     if show_acct:
         headers.append('Account')
-    headers += ['Sleeve', 'Price', '% vs 200d', 'Value', 'Weight', 'P&L %',
-                'Entry', 'Stop', 'Target', 'R/R', 'Max add (risk)', 'Action']
+    headers += ['Sleeve', 'Shares', 'Price', '% vs 200d', 'Value', 'Weight', 'P&L %',
+                'Entry', 'Stop', 'Target', 'R/R', 'R now', '% to stop', 'Max add (risk)', 'Action']
     ordered = monitor.copy()
     ordered['_core'] = ordered['Sleeve'].map(is_core)
     ordered = ordered.sort_values(
@@ -226,19 +277,22 @@ def _holdings_section(
             add_txt = '\u2014'
             action = core_action(r)
         else:
-            sizing = add_sizing(account_value, settings, a, current_value)
-            action = satellite_action(r, a, sizing, actionable)
-            can_add = not action.startswith(('Trim', 'Exit'))
+            sizing = add_sizing(account_value, settings, a, current_value, open_risk_pct)
+            action = satellite_action(r, a, sizing, actionable, settings)
+            can_add = not action.startswith(('Trim', 'Exit', 'Cut', 'Take profit'))
             add_txt = (
                 _num(sizing.shares, 3)
                 if can_add and sizing and sizing.shares > 0
                 else '\u2014'
             )
+        r_now = open_r_multiple(r.get('Price'), a.get('Entry'), a.get('Stop'))
+        to_stop = pct_to_stop(r.get('Price'), a.get('Stop'))
         row = [ticker]
         if show_acct:
             row.append(_text(r.get('Account')))
         row += [
             'Core' if core else 'Satellite',
+            _num(r.get('Shares'), 3),
             _money(r.get('Price')),
             _pct(r.get('% vs SMA200')),
             _money(r.get('Value')),
@@ -248,6 +302,8 @@ def _holdings_section(
             _money(a.get('Stop')),
             _money(a.get('Target')),
             _num(a.get('R/R')),
+            _num(r_now, 1) if r_now is not None else '\u2014',
+            _pct(to_stop),
             add_txt,
             action,
         ]
@@ -256,7 +312,8 @@ def _holdings_section(
 
 
 def _watchlist_section(
-    watch_monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings
+    watch_monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings,
+    open_risk_pct: float = 0.0,
 ) -> str:
     """Followed (unheld) names, same plan columns as Holdings for consistency."""
     headers = ['Ticker', 'Price', 'Setup', 'Conf', 'Entry', 'Stop', 'Target',
@@ -266,7 +323,7 @@ def _watchlist_section(
         ticker = str(r['Ticker'])
         a = lookup.get(ticker, {})
         actionable = bool(a.get('Actionable', False))
-        sizing = add_sizing(account_value, settings, a, current_value=0.0)
+        sizing = add_sizing(account_value, settings, a, 0.0, open_risk_pct)
         add_txt = _num(sizing.shares, 3) if sizing and sizing.shares > 0 else '\u2014'
         action = 'Buy candidate \u2014 setup live' if actionable else 'Watch \u2014 no setup yet'
         rows.append([
@@ -290,6 +347,7 @@ def _recommendations_section(
     account_value: float,
     settings: Settings,
     current_values: dict[str, float] | None = None,
+    open_risk_pct: float = 0.0,
 ) -> str:
     if recs is None or recs.empty:
         return (
@@ -304,7 +362,8 @@ def _recommendations_section(
     for _, r in recs.iterrows():
         ticker = str(r['Ticker'])
         sizing = add_sizing(
-            account_value, settings, r.to_dict(), current_value=current_values.get(ticker, 0.0)
+            account_value, settings, r.to_dict(),
+            current_value=current_values.get(ticker, 0.0), open_risk_pct=open_risk_pct,
         )
         rows.append([
             ticker,
@@ -465,22 +524,30 @@ def _build_report(
     account_value: float,
     settings: Settings,
     exposure: tuple[list, float] = ([], 0.0),
+    risk_on: bool = True,
+    earnings: set[str] | None = None,
 ) -> str:
     lookup = analysis_lookup(analysis)
     context = _market_context(analysis, recs)
     exposures, tail_value = exposure
+    _, open_risk_pct = portfolio_open_risk(monitor, lookup, account_value)
     held_values = {
         str(r['Ticker']): float(r['Value'])
         for _, r in monitor.iterrows()
         if not _isna(r.get('Value'))
     }
     sections = [
-        f'# Daily Position Report\n\n_Generated {generated_at}. Market context: {context}._',
+        f'# Daily Position Report\n\n_Generated {generated_at}. Market context: {context}. '
+        f'Regime: {"Risk-On" if risk_on else "Risk-Off"}._',
         _legend_section(settings),
         _snapshot_section(monitor, lookup, etfs, account_value, settings),
-        _holdings_section(monitor, lookup, account_value, settings),
-        _watchlist_section(watch_monitor, lookup, account_value, settings),
-        _recommendations_section(recs, rec_etfs, account_value, settings, held_values),
+        _action_plan_section(
+            monitor, watch_monitor, lookup, recs, account_value, settings, risk_on, open_risk_pct,
+            earnings,
+        ),
+        _holdings_section(monitor, lookup, account_value, settings, open_risk_pct),
+        _watchlist_section(watch_monitor, lookup, account_value, settings, open_risk_pct),
+        _recommendations_section(recs, rec_etfs, account_value, settings, held_values, open_risk_pct),
         _concentration_section(monitor, analysis, etfs, settings),
     ]
     exposure_section = _exposure_section(exposures, tail_value, account_value)
@@ -498,6 +565,64 @@ def _build_unavailable(generated_at: str, reason: str) -> str:
     )
 
 
+def _screen_recommendations(engine, cache, watch: list[str], gate_config: FilterConfig):
+    """Rank S&P 500 + watchlist adds, best first; empty frame if none qualify."""
+    universe_full = load_sp500_universe(cache)
+    tickers = list(dict.fromkeys([*universe_full.tickers, *watch]))
+    universe = UniverseResult(tickers=tickers, companies=dict(universe_full.companies))
+    recs = engine.screen(universe, config=gate_config)
+    if not recs.empty:
+        recs = recs.sort_values('Rank Score', ascending=False).reset_index(drop=True)
+    return recs
+
+
+def _generate_report(client, engine, cache, settings: Settings, generated_at: str) -> tuple[str, str]:
+    """Assemble the report markdown plus a one-line status; pure of file writes."""
+    positions_text = _read(POSITIONS_FILE)
+    merged = merge_holdings(parse_portfolio(_read(PORTFOLIO_FILE)), parse_positions(positions_text))
+    if not merged:
+        return (
+            _build_unavailable(generated_at, 'no holdings in portfolio.txt/positions.txt'),
+            'No holdings found; wrote placeholder report.',
+        )
+
+    held = [e.ticker for e in merged]
+    watch = [t for t in _followed_tickers() if t not in set(held)]
+    universe = [*held, *watch]
+    history = client.fetch_history(universe, period=HISTORY_PERIOD)
+    monitor = build_monitor(merged, history, settings)
+    watch_monitor = build_monitor([PositionEntry(t, sleeve=SATELLITE) for t in watch], history, settings)
+    account_value = parse_account_value(positions_text) or float(monitor['Value'].dropna().sum())
+
+    gate_config = FilterConfig(
+        min_confidence=settings.rec_min_confidence,
+        min_reward_risk=settings.rec_min_reward_risk,
+        min_avg_volume=settings.min_avg_volume,
+    )
+    analysis = engine.analyze(UniverseResult(tickers=universe, companies={}), config=gate_config)
+    etfs = _etf_tickers(client, universe)
+    recs = _screen_recommendations(engine, cache, watch, gate_config)
+    rec_etfs = _etf_tickers(client, list(recs['Ticker'])) if not recs.empty else set()
+
+    report = _build_report(
+        generated_at=generated_at,
+        monitor=monitor,
+        watch_monitor=watch_monitor,
+        analysis=analysis,
+        recs=recs,
+        etfs=etfs,
+        rec_etfs=rec_etfs,
+        account_value=account_value,
+        settings=settings,
+        exposure=_build_exposure(client, monitor, etfs, account_value, analysis),
+        risk_on=regime_risk_on(client, settings),
+        earnings=earnings_soon(client, held, settings.earnings_blackout_days),
+    )
+    status = (f'{len(monitor)} holding(s), {len(watch_monitor)} watch, '
+              f'{len(recs)} recommendation(s).')
+    return report, status
+
+
 def main() -> int:
     settings = load_settings()
     generated_at = datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')
@@ -508,76 +633,14 @@ def main() -> int:
         strategy=StrategyConfig.from_settings(settings),
         portfolio=PortfolioConfig.from_settings(settings),
     )
-
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-
     try:
-        portfolio_entries = parse_portfolio(_read(PORTFOLIO_FILE))
-        positions_text = _read(POSITIONS_FILE)
-        position_entries = parse_positions(positions_text)
-        merged = merge_holdings(portfolio_entries, position_entries)
-        if not merged:
-            report = _build_unavailable(generated_at, 'no holdings in portfolio.txt/positions.txt')
-            REPORT_PATH.write_text(report, encoding='utf-8')
-            print('No holdings found; wrote placeholder report.')
-            return 0
-
-        held = [e.ticker for e in merged]
-        held_set = set(held)
-        watch = [t for t in _watchlist_tickers() if t not in held_set]
-        account_value = parse_account_value(positions_text) or 0.0
-
-        history = client.fetch_history([*held, *watch], period=HISTORY_PERIOD)
-        monitor = build_monitor(merged, history, settings)
-        watch_entries = [PositionEntry(t, sleeve=SATELLITE) for t in watch]
-        watch_monitor = build_monitor(watch_entries, history, settings)
-
-        if account_value <= 0:
-            account_value = float(monitor['Value'].dropna().sum())
-
-        gate_config = FilterConfig(
-            min_confidence=settings.rec_min_confidence,
-            min_reward_risk=settings.rec_min_reward_risk,
-            min_avg_volume=settings.min_avg_volume,
-        )
-
-        held_universe = UniverseResult(tickers=[*held, *watch], companies={})
-        analysis = engine.analyze(held_universe, config=gate_config)
-        etfs = _etf_tickers(client, [*held, *watch])
-
-        rec_universe_full = load_sp500_universe(cache)
-        rec_tickers = list(dict.fromkeys([*rec_universe_full.tickers, *watch]))
-        rec_universe = UniverseResult(
-            tickers=rec_tickers, companies=dict(rec_universe_full.companies)
-        )
-        recs = engine.screen(rec_universe, config=gate_config)
-        if not recs.empty:
-            recs = recs.sort_values('Rank Score', ascending=False).reset_index(drop=True)
-        rec_etfs = _etf_tickers(client, list(recs['Ticker'])) if not recs.empty else set()
-
-        exposure = _build_exposure(client, monitor, etfs, account_value, analysis)
-
-        report = _build_report(
-            generated_at=generated_at,
-            monitor=monitor,
-            watch_monitor=watch_monitor,
-            analysis=analysis,
-            recs=recs,
-            etfs=etfs,
-            rec_etfs=rec_etfs,
-            account_value=account_value,
-            settings=settings,
-            exposure=exposure,
-        )
+        report, status = _generate_report(client, engine, cache, settings, generated_at)
         REPORT_PATH.write_text(report, encoding='utf-8')
-        print(
-            f'Wrote {REPORT_PATH.relative_to(_REPO_ROOT)}: '
-            f'{len(monitor)} holding(s), {len(watch_monitor)} watch, {len(recs)} recommendation(s).'
-        )
+        print(f'Wrote {REPORT_PATH.relative_to(_REPO_ROOT)}: {status}')
         return 0
     except Exception as exc:  # network / data feed problems must not crash the run
-        report = _build_unavailable(generated_at, type(exc).__name__)
-        REPORT_PATH.write_text(report, encoding='utf-8')
+        REPORT_PATH.write_text(_build_unavailable(generated_at, type(exc).__name__), encoding='utf-8')
         _LOGGER.exception('Report generation failed: %s', type(exc).__name__)
         return 1
 

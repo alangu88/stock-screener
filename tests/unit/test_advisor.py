@@ -7,6 +7,10 @@ from src.screener.advisor import (
     core_rebalance,
     individual_cap_state,
     is_core,
+    open_r_multiple,
+    pct_to_stop,
+    pct_to_target,
+    portfolio_open_risk,
     recommendation_rows,
     rotation_candidates,
     satellite_action,
@@ -15,6 +19,7 @@ from src.screener.holdings import AllocationStats
 from src.screener.sizing import PositionSizing
 
 SETTINGS = Settings()
+SWING = Settings(swing_mode=True)
 
 
 def test_is_core_case_insensitive():
@@ -56,6 +61,31 @@ def test_add_sizing_guards():
     assert add_sizing(100_000, SETTINGS, {'Entry': 90.0, 'Stop': 100.0}, 0.0) is None
 
 
+def test_add_sizing_denied_at_portfolio_risk_cap():
+    row = {'Entry': 100.0, 'Stop': 90.0}
+    assert add_sizing(100_000, SETTINGS, row, 0.0, open_risk_pct=SETTINGS.max_portfolio_risk) is None
+
+
+def test_add_sizing_trims_to_headroom():
+    row = {'Entry': 100.0, 'Stop': 90.0}
+    near_cap = SETTINGS.max_portfolio_risk - 0.001  # tiny headroom left
+    full = add_sizing(100_000, SETTINGS, row, 0.0)
+    trimmed = add_sizing(100_000, SETTINGS, row, 0.0, open_risk_pct=near_cap)
+    assert trimmed is not None and full is not None
+    assert trimmed.shares < full.shares
+
+
+def test_portfolio_open_risk_excludes_core():
+    monitor = pd.DataFrame([
+        {'Ticker': 'AAA', 'Sleeve': 'Satellite', 'Shares': 100, 'Price': 50.0},
+        {'Ticker': 'CORE', 'Sleeve': 'Core', 'Shares': 100, 'Price': 50.0},
+    ])
+    lookup = {'AAA': {'Stop': 45.0}, 'CORE': {'Stop': 40.0}}
+    dollars, pct = portfolio_open_risk(monitor, lookup, 100_000)
+    assert dollars == 500.0  # 100 * (50 - 45); core ignored
+    assert pct == 0.005
+
+
 def test_satellite_action_stop_breached():
     monitor_row = {'Price': 88.0, '% vs SMA200': 0.05, '% vs EMA20': 0.0}
     analysis_row = {'Stop': 90.0, 'Entry': 100.0}
@@ -85,6 +115,77 @@ def test_satellite_action_hold():
     monitor_row = {'Price': 101.0, '% vs SMA200': 0.05, '% vs EMA20': 0.02}
     analysis_row = {'Stop': 90.0, 'Entry': 100.0}
     assert satellite_action(monitor_row, analysis_row, None, False) == 'Hold \u2014 trend intact'
+
+
+def test_swing_action_cut_stop():
+    monitor_row = {'Price': 88.0, '% vs SMA200': 0.05, '% vs EMA20': 0.0, 'Unreal P&L %': -0.1,
+                   'Shares': 30, 'Value': 2640.0}
+    analysis_row = {'Stop': 90.0, 'Target': 130.0, 'Entry': 100.0}
+    assert satellite_action(monitor_row, analysis_row, None, False, SWING) == (
+        'Cut \u2014 stop hit (sell 30 sh \u2248 $2,640)'
+    )
+
+
+def test_swing_action_take_profit_target():
+    monitor_row = {'Price': 132.0, '% vs SMA200': 0.30, '% vs EMA20': 0.20, 'Unreal P&L %': 0.3,
+                   'Shares': 30, 'Value': 3960.0}
+    analysis_row = {'Stop': 90.0, 'Target': 130.0, 'Entry': 100.0}
+    assert satellite_action(monitor_row, analysis_row, None, False, SWING) == (
+        'Take profit \u2014 sell \u2153 at target (sell 10 sh \u2248 $1,320)'
+    )
+
+
+def test_swing_action_cut_trend():
+    monitor_row = {'Price': 95.0, '% vs SMA200': -0.02, '% vs EMA20': 0.0, 'Unreal P&L %': -0.05}
+    analysis_row = {'Stop': 90.0, 'Target': 130.0, 'Entry': 100.0}
+    assert satellite_action(monitor_row, analysis_row, None, False, SWING) == (
+        'Cut \u2014 trend broken below 200-day'
+    )
+
+
+def test_swing_action_scale_extended():
+    monitor_row = {'Price': 115.0, '% vs SMA200': 0.30, '% vs EMA20': 0.15, 'Unreal P&L %': 0.15}
+    analysis_row = {'Stop': 90.0, 'Target': 200.0, 'Entry': 100.0}
+    assert satellite_action(monitor_row, analysis_row, None, False, SWING) == (
+        'Take profit \u2014 extended, scale out \u2153'
+    )
+
+
+def test_swing_action_trail():
+    monitor_row = {'Price': 105.0, '% vs SMA200': 0.10, '% vs EMA20': 0.03, 'Unreal P&L %': 0.05}
+    analysis_row = {'Stop': 90.0, 'Target': 200.0, 'Entry': 100.0}
+    assert satellite_action(monitor_row, analysis_row, None, False, SWING) == 'Trail \u2014 let it run'
+
+
+def test_pct_to_stop_and_target():
+    assert pct_to_stop(100.0, 90.0) == 0.10
+    assert pct_to_target(100.0, 120.0) == 0.20
+    assert pct_to_stop(None, 90.0) is None
+    assert pct_to_target(100.0, None) is None
+
+
+def test_swing_action_breakeven():
+    monitor_row = {'Price': 110.0, '% vs SMA200': 0.10, '% vs EMA20': 0.03, 'Unreal P&L %': 0.1}
+    analysis_row = {'Stop': 90.0, 'Target': 200.0, 'Entry': 100.0}
+    assert satellite_action(monitor_row, analysis_row, None, False, SWING) == (
+        'Trail \u2014 stop to breakeven'
+    )
+
+
+def test_swing_action_scale_2r():
+    monitor_row = {'Price': 121.0, '% vs SMA200': 0.10, '% vs EMA20': 0.04, 'Unreal P&L %': 0.21}
+    analysis_row = {'Stop': 90.0, 'Target': 200.0, 'Entry': 100.0}
+    assert satellite_action(monitor_row, analysis_row, None, False, SWING) == (
+        'Take profit \u2014 +2R, scale out \u2153'
+    )
+
+
+def test_open_r_multiple():
+    assert open_r_multiple(120.0, 100.0, 90.0) == 2.0
+    assert open_r_multiple(95.0, 100.0, 90.0) == -0.5
+    assert open_r_multiple(120.0, 100.0, 100.0) is None
+    assert open_r_multiple(None, 100.0, 90.0) is None
+
 
 
 def _monitor(tickers_sleeves):

@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -37,8 +40,36 @@ from src.screener.strategy import StrategyConfig  # noqa: E402
 
 BENCHMARK = 'SPY'
 
+# Named stress windows (entry-date filters) for event-driven backtests.
+EVENTS = {
+    '2018 Q4 selloff': ('2018-10-01', '2019-01-31'),
+    'COVID crash': ('2020-02-15', '2020-06-30'),
+    '2022 bear': ('2022-01-01', '2022-12-31'),
+    'SVB / 2023 banks': ('2023-02-15', '2023-05-15'),
+    '2025 tariff shock': ('2025-02-01', '2025-06-30'),
+}
 
-def _watchlist_tickers() -> list[str]:
+_WORKER_CTX: dict = {}
+
+
+def _worker_init(benchmark_close, strategy, gates, step, cooldown) -> None:
+    _WORKER_CTX.update(
+        benchmark_close=benchmark_close, strategy=strategy, gates=gates,
+        step=step, cooldown=cooldown,
+    )
+
+
+def _gen_one(item):
+    ticker, df = item
+    if df is None or df.empty:
+        return []
+    return generate_entries(
+        ticker, df, _WORKER_CTX['benchmark_close'], _WORKER_CTX['strategy'],
+        _WORKER_CTX['gates'], step=_WORKER_CTX['step'], cooldown_bars=_WORKER_CTX['cooldown'],
+    )
+
+
+def _watchlist_raw() -> list[str]:
     path = ROOT / 'watchlist.txt'
     if not path.exists():
         return []
@@ -54,7 +85,7 @@ def _universe_tickers(name: str, cache: SQLiteCache, max_tickers: int) -> list[s
     if name == 'sp500':
         tickers = list(load_sp500_universe(cache).tickers)
     else:
-        tickers = _watchlist_tickers()
+        tickers = _watchlist_raw()
     if max_tickers > 0:
         tickers = tickers[:max_tickers]
     return tickers
@@ -83,8 +114,17 @@ def main() -> int:
     parser.add_argument('--max-tickers', type=int, default=80)
     parser.add_argument('--step', type=int, default=1, help='Bars between entry checks.')
     parser.add_argument('--cooldown', type=int, default=5, help='Bars to skip after an entry.')
+    parser.add_argument('--workers', type=int, default=1, help='Parallel processes for entries.')
+    parser.add_argument(
+        '--regime', action='store_true',
+        help='Only enter when SPY is above its 200-day MA (risk-on filter).'
+    )
     parser.add_argument('--force-refresh', action='store_true', help='Bypass the cache.')
     parser.add_argument('--by-setup', action='store_true', help='Also break down by setup.')
+    parser.add_argument(
+        '--events', action='store_true',
+        help='Break down expectancy by major market-stress windows (entry date).'
+    )
     parser.add_argument(
         '--min-confidence', type=float, default=None,
         help='Override the entry confidence gate (default: rec gate from settings).',
@@ -105,6 +145,7 @@ def main() -> int:
         ),
         min_reward_risk=(args.min_rr if args.min_rr is not None else settings.rec_min_reward_risk),
         min_avg_volume=settings.min_avg_volume,
+        require_regime=args.regime,
     )
 
     tickers = _universe_tickers(args.universe, cache, args.max_tickers)
@@ -122,16 +163,26 @@ def main() -> int:
     histories = client.fetch_history(tickers, period=args.period, force_refresh=args.force_refresh)
 
     all_entries = []
-    for ticker in tickers:
-        df = histories.get(ticker)
-        if df is None or df.empty:
-            continue
-        all_entries.extend(
-            generate_entries(
-                ticker, df, benchmark_close, strategy, gates,
-                step=args.step, cooldown_bars=args.cooldown,
+    items = [(t, histories.get(t)) for t in tickers]
+    if args.workers > 1:
+        with ProcessPoolExecutor(
+            max_workers=args.workers,
+            initializer=_worker_init,
+            initargs=(benchmark_close, strategy, gates, args.step, args.cooldown),
+        ) as pool:
+            for entries in pool.map(_gen_one, items):
+                all_entries.extend(entries)
+    else:
+        for ticker in tickers:
+            df = histories.get(ticker)
+            if df is None or df.empty:
+                continue
+            all_entries.extend(
+                generate_entries(
+                    ticker, df, benchmark_close, strategy, gates,
+                    step=args.step, cooldown_bars=args.cooldown,
+                )
             )
-        )
 
     print(
         f'\nUniverse: {args.universe} ({len(tickers)} tickers, {args.period}) | '
@@ -152,6 +203,18 @@ def main() -> int:
             sub_results = simulate_entries(subset, histories, variants, strategy.atr_period)
             sub_stats = [summarize(v.name, sub_results[v.name]) for v in variants]
             print(f'\n--- Setup: {setup} ({len(subset)} entries) ---')
+            _print_table(sub_stats)
+
+    if args.events:
+        for name, (start, end) in EVENTS.items():
+            lo, hi = pd.Timestamp(start), pd.Timestamp(end)
+            subset = [e for e in all_entries if lo <= e.date <= hi]
+            if not subset:
+                print(f'\n--- Event: {name} ({start} -> {end}) | no entries ---')
+                continue
+            sub_results = simulate_entries(subset, histories, variants, strategy.atr_period)
+            sub_stats = [summarize(v.name, sub_results[v.name]) for v in variants]
+            print(f'\n--- Event: {name} ({start} -> {end}) | {len(subset)} entries ---')
             _print_table(sub_stats)
 
     print(

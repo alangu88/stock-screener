@@ -19,8 +19,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from src.analysis.features import MIN_BARS, compute_features
-from src.analysis.indicators import atr
+from src.analysis.features import MIN_BARS, compute_feature_panel, features_at
+from src.analysis.indicators import atr, sma
 from src.backtest.stops import StopParams, TradeResult, simulate_trade
 from src.screener.ranking import confidence_score
 from src.screener.setups import AVOID, detect_setup
@@ -47,6 +47,7 @@ class GateConfig:
     min_confidence: float = 45.0
     min_reward_risk: float = 1.5
     min_avg_volume: float = 500_000.0
+    require_regime: bool = False  # only enter when SPY is above its long MA
 
 
 def generate_entries(
@@ -74,14 +75,21 @@ def generate_entries(
     entries: list[Entry] = []
     index = close.index
     cooldown_until = -1
+    panel = compute_feature_panel(df, benchmark_close, strategy)
+    if panel is None:
+        return []
+    regime_ok = None
+    if gates.require_regime:
+        bench = benchmark_close.reindex(index).ffill()
+        regime_ok = bench >= sma(bench, strategy.ma_long)
     # Leave the final bar out so every entry has at least one forward bar.
     for pos in range(MIN_BARS, len(index) - 1, max(step, 1)):
         if pos <= cooldown_until:
             continue
         date = index[pos]
-        window = df.loc[:date]
-        bench = benchmark_close.loc[:date]
-        features = compute_features(window, bench, strategy)
+        if regime_ok is not None and not bool(regime_ok.iloc[pos]):
+            continue
+        features = features_at(panel, pos, strategy)
         if features is None:
             continue
         if features.avg_volume < gates.min_avg_volume:
@@ -113,16 +121,20 @@ def generate_entries(
     return entries
 
 
-def _forward_arrays(df: pd.DataFrame, entry_date: pd.Timestamp, atr_period: int):
+def _forward_arrays(df: pd.DataFrame, entry_date: pd.Timestamp, atr_period: int,
+                    atr_series: pd.Series | None = None):
     """Forward OHLC arrays (entry bar excluded) plus a prior-bar ATR series.
 
     Rows with a missing close are dropped and High/Low fall back to Close, so a
     gap in the longer histories cannot inject NaN into the simulated result.
+    ``atr_series`` may be supplied precomputed (already ``.shift(1)``) to avoid
+    recomputing ATR over the full history once per entry.
     """
     close_full = df['Close']
     high_full = df['High'] if 'High' in df.columns else close_full
     low_full = df['Low'] if 'Low' in df.columns else close_full
-    atr_series = atr(high_full, low_full, close_full, atr_period).shift(1)
+    if atr_series is None:
+        atr_series = atr(high_full, low_full, close_full, atr_period).shift(1)
 
     pos = df.index.get_loc(entry_date)
     fwd = slice(pos + 1, len(df))
@@ -149,11 +161,19 @@ def simulate_entries(
 ) -> dict[str, list[TradeResult]]:
     """Run every entry through every stop variant. Returns variant -> results."""
     results: dict[str, list[TradeResult]] = {v.name: [] for v in variants}
+    atr_cache: dict[str, pd.Series] = {}
     for e in entries:
         df = histories.get(e.ticker)
         if df is None or e.date not in df.index:
             continue
-        high, low, close, atr_prev = _forward_arrays(df, e.date, atr_period)
+        atr_series = atr_cache.get(e.ticker)
+        if atr_series is None:
+            close_full = df['Close']
+            high_full = df['High'] if 'High' in df.columns else close_full
+            low_full = df['Low'] if 'Low' in df.columns else close_full
+            atr_series = atr(high_full, low_full, close_full, atr_period).shift(1)
+            atr_cache[e.ticker] = atr_series
+        high, low, close, atr_prev = _forward_arrays(df, e.date, atr_period, atr_series)
         if len(high) == 0:
             continue
         for v in variants:

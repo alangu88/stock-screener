@@ -6,6 +6,8 @@ import pandas as pd
 import streamlit as st
 
 from src.config import Settings
+from src.data.market import earnings_soon as _earnings_soon
+from src.data.market import regime_risk_on as _regime_risk_on
 from src.data.universe import UniverseResult
 from src.data.yahoo_client import YahooFinanceClient
 from src.screener.advisor import (
@@ -13,6 +15,10 @@ from src.screener.advisor import (
     analysis_lookup,
     core_rebalance,
     is_core,
+    open_r_multiple,
+    pct_to_stop,
+    pct_to_target,
+    portfolio_open_risk,
     satellite_action,
 )
 from src.screener.engine import FilterConfig, ScreenerEngine
@@ -71,6 +77,9 @@ _PLAN_FORMATTERS = {
     'Unreal P&L %': percent,
     'Add Shares': shares,
     'Add $': money,
+    '% to Stop': percent,
+    '% to Target': percent,
+    'R': score,
 }
 
 _CORE_DISPLAY_COLUMNS = (
@@ -187,6 +196,13 @@ def _analyze_positions(
     st.session_state['positions_account_value'] = account_value
     st.session_state['merged_entries'] = merged
     st.session_state['positions_portfolio_value'] = float(monitor['Value'].dropna().sum())
+    lookup = analysis_lookup(analysis)
+    _, open_risk_pct = portfolio_open_risk(monitor, lookup, account_value)
+    st.session_state['positions_open_risk_pct'] = open_risk_pct
+    st.session_state['positions_risk_on'] = _regime_risk_on(client, settings)
+    st.session_state['positions_earnings'] = _earnings_soon(
+        client, held, settings.earnings_blackout_days
+    )
 
 
 def _render_overview(monitor: pd.DataFrame, settings: Settings, account_value: float) -> None:
@@ -196,20 +212,30 @@ def _render_overview(monitor: pd.DataFrame, settings: Settings, account_value: f
     account_value = st.session_state.get('positions_account_value', account_value)
     merged = st.session_state.get('merged_entries', [])
     lookup = analysis_lookup(analysis)
+    open_risk_pct = float(st.session_state.get('positions_open_risk_pct', 0.0))
+    risk_on = bool(st.session_state.get('positions_risk_on', True))
+    earnings = st.session_state.get('positions_earnings', set())
 
+    if not risk_on:
+        st.warning('Risk-off: SPY is below its 200-day — new buys are paused.')
+    headroom = max(settings.max_portfolio_risk - open_risk_pct, 0.0)
     held_value = monitor['Value'].dropna()
     if not held_value.empty:
-        c1, c2 = st.columns(2)
-        c1.metric('Portfolio value', money(float(held_value.sum())))
+        total = float(held_value.sum())
+        cash = max(account_value - total, 0.0)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric('Portfolio value', money(total))
         c2.metric('Unrealized P&L', money(float(monitor['Unreal P&L $'].dropna().sum())))
+        c3.metric('Risk headroom', percent(headroom))
+        c4.metric('Cash', percent(cash / account_value) if account_value > 0 else '—')
 
     core_tab, sat_tab, watch_tab = st.tabs(['Core', 'Satellite', 'Watchlist'])
     with core_tab:
         _render_core_panel(monitor)
     with sat_tab:
-        _render_satellite_panel(monitor, lookup, account_value, settings)
+        _render_satellite_panel(monitor, lookup, account_value, settings, open_risk_pct, earnings)
     with watch_tab:
-        _render_watchlist_panel(watch_monitor, lookup, account_value, settings)
+        _render_watchlist_panel(watch_monitor, lookup, account_value, settings, open_risk_pct)
 
     _render_allocation_panel(monitor, etfs, settings)
     _render_risk_panel(monitor, lookup, account_value)
@@ -237,8 +263,10 @@ def _render_core_panel(monitor: pd.DataFrame) -> None:
 
 
 def _render_satellite_panel(
-    monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings
+    monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings,
+    open_risk_pct: float = 0.0, earnings: set[str] | None = None,
 ) -> None:
+    earnings = earnings or set()
     sat = monitor[~monitor['Sleeve'].map(is_core)]
     st.caption(
         'Tactical names with a trade plan and risk-sized add suggestion '
@@ -254,7 +282,7 @@ def _render_satellite_panel(
         a = lookup.get(ticker, {})
         current_value = float(r['Value']) if pd.notna(r['Value']) else 0.0
         actionable = bool(a.get('Actionable', False))
-        sizing = add_sizing(account_value, settings, a, current_value)
+        sizing = add_sizing(account_value, settings, a, current_value, open_risk_pct)
         row = {
             'Ticker': ticker,
             'Account': r.get('Account'),
@@ -267,9 +295,13 @@ def _render_satellite_panel(
             'Value': r['Value'],
             'Weight %': r['Weight %'],
             'Unreal P&L %': r['Unreal P&L %'],
+            '% to Stop': pct_to_stop(r['Price'], a.get('Stop')),
+            '% to Target': pct_to_target(r['Price'], a.get('Target')),
+            'R': open_r_multiple(r['Price'], a.get('Entry'), a.get('Stop')),
             'Add Shares': sizing.shares if sizing else None,
             'Add $': sizing.dollars if sizing else None,
-            'Action': satellite_action(r, a, sizing, actionable),
+            'Earnings': 'soon' if ticker in earnings else '',
+            'Action': satellite_action(r, a, sizing, actionable, settings),
         }
         if not has_acct:
             row.pop('Account')
@@ -279,7 +311,8 @@ def _render_satellite_panel(
 
 
 def _render_watchlist_panel(
-    watch_monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings
+    watch_monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings,
+    open_risk_pct: float = 0.0,
 ) -> None:
     st.caption('Names you follow (no positions). New-entry size assumes a fresh buy.')
     if watch_monitor is None or watch_monitor.empty:
@@ -290,7 +323,7 @@ def _render_watchlist_panel(
         ticker = str(r['Ticker'])
         a = lookup.get(ticker, {})
         actionable = bool(a.get('Actionable', False))
-        sizing = add_sizing(account_value, settings, a, current_value=0.0)
+        sizing = add_sizing(account_value, settings, a, 0.0, open_risk_pct)
         rows.append({
             'Ticker': ticker,
             'Price': r['Price'],

@@ -8,6 +8,11 @@ from pathlib import Path
 from src.utils.errors import ConfigError
 
 
+def _as_bool(raw: str) -> bool:
+    """Parse a ``SCREENER_*`` flag; truthy for 1/true/yes/on (case-insensitive)."""
+    return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
 @dataclass(frozen=True)
 class Settings:
     # Data fetching and caching
@@ -35,11 +40,19 @@ class Settings:
 
     # Risk-based position sizing and add recommendations
     risk_per_trade: float = 0.01
+    conviction_risk_max: float = 0.02  # hard cap when scaling risk by confidence
+    max_portfolio_risk: float = 0.08  # cap on aggregate open risk before new adds shrink
     core_allocation_min: float = 0.60
     core_allocation_max: float = 0.70
     max_individual_stocks: int = 10
-    rec_min_confidence: float = 85.0
+    rec_min_confidence: float = 70.0
     rec_min_reward_risk: float = 2.5
+
+    # Swing-trading management for satellites (off by default; cores unaffected)
+    swing_mode: bool = False
+    swing_time_stop_bars: int = 20  # cut dead money if no progress within N bars
+    swing_extended_atr: float = 0.10  # > this above EMA20 -> extended, scale partial
+    earnings_blackout_days: int = 7  # flag holdings/adds within N days of earnings
 
     def __post_init__(self) -> None:
         positive = {
@@ -56,6 +69,8 @@ class Settings:
             'max_position_weight': self.max_position_weight,
             'max_individual_stocks': self.max_individual_stocks,
             'rec_min_reward_risk': self.rec_min_reward_risk,
+            'swing_time_stop_bars': self.swing_time_stop_bars,
+            'earnings_blackout_days': self.earnings_blackout_days,
         }
         for name, value in positive.items():
             if value <= 0:
@@ -66,6 +81,7 @@ class Settings:
             'request_delay_seconds': self.request_delay_seconds,
             'min_avg_volume': self.min_avg_volume,
             'risk_per_trade': self.risk_per_trade,
+            'swing_extended_atr': self.swing_extended_atr,
         }
         for name, value in non_negative.items():
             if value < 0:
@@ -76,6 +92,8 @@ class Settings:
             'core_score_threshold': self.core_score_threshold,
             'max_position_weight': self.max_position_weight,
             'risk_per_trade': self.risk_per_trade,
+            'conviction_risk_max': self.conviction_risk_max,
+            'max_portfolio_risk': self.max_portfolio_risk,
             'core_allocation_min': self.core_allocation_min,
             'core_allocation_max': self.core_allocation_max,
         }
@@ -118,11 +136,17 @@ def load_settings() -> Settings:
         ('core_score_threshold', 'CORE_SCORE_THRESHOLD', float),
         ('max_position_weight', 'MAX_POSITION_WEIGHT', float),
         ('risk_per_trade', 'RISK_PER_TRADE', float),
+        ('conviction_risk_max', 'CONVICTION_RISK_MAX', float),
+        ('max_portfolio_risk', 'MAX_PORTFOLIO_RISK', float),
         ('core_allocation_min', 'CORE_ALLOCATION_MIN', float),
         ('core_allocation_max', 'CORE_ALLOCATION_MAX', float),
         ('max_individual_stocks', 'MAX_INDIVIDUAL_STOCKS', int),
         ('rec_min_confidence', 'REC_MIN_CONFIDENCE', float),
         ('rec_min_reward_risk', 'REC_MIN_REWARD_RISK', float),
+        ('swing_mode', 'SWING_MODE', _as_bool),
+        ('swing_time_stop_bars', 'SWING_TIME_STOP_BARS', int),
+        ('swing_extended_atr', 'SWING_EXTENDED_ATR', float),
+        ('earnings_blackout_days', 'EARNINGS_BLACKOUT_DAYS', int),
     )
 
     values = {}

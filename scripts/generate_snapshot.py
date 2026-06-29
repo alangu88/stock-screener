@@ -76,7 +76,7 @@ def _held_tickers() -> set[str]:
     return {normalize_ticker(entry.ticker) for entry in merged}
 
 
-def _watchlist_tickers(held: set[str]) -> list[str]:
+def _followed_and_held(held: set[str]) -> list[str]:
     """Followed names plus all held positions, normalized and de-duplicated."""
     followed = {normalize_ticker(entry.ticker) for entry in parse_portfolio(_read(WATCHLIST_PATH))}
     return sorted(followed | held)
@@ -112,7 +112,7 @@ def main() -> int:
     )
 
     held = _held_tickers()
-    watchlist = _watchlist_tickers(held)
+    watchlist = _followed_and_held(held)
 
     try:
         sp500 = load_sp500_universe(cache)

@@ -60,6 +60,16 @@ def test_load_settings_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.risk_per_trade == 0.02
 
 
+def test_strategy_confidence_weights_must_sum_to_one() -> None:
+    import dataclasses as dc
+
+    from src.screener.strategy import StrategyConfig
+
+    StrategyConfig()  # defaults sum to 1.0
+    with pytest.raises(ValueError):
+        dc.replace(StrategyConfig(), weight_trend=0.99)
+
+
 def test_load_settings_rejects_invalid_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('SCREENER_MAX_RETRIES', '0')
     with pytest.raises(ConfigError):

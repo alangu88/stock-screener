@@ -86,8 +86,11 @@ def render_recommendations(
 
     etfs = st.session_state.get('recommendation_etfs', set())
     account_value = float(st.session_state.get('positions_account_value', 0.0) or 0.0)
+    open_risk_pct = float(st.session_state.get('positions_open_risk_pct', 0.0))
+    if not st.session_state.get('positions_risk_on', True):
+        st.warning('Risk-off: SPY is below its 200-day — consider holding off on new adds.')
     current_values = _position_values(st.session_state.get('monitor_df'))
-    table = recommendation_rows(recs, account_value, settings, etfs, current_values)
+    table = recommendation_rows(recs, account_value, settings, etfs, current_values, open_risk_pct)
 
     at_cap, cap_note = _cap_state(settings)
     if at_cap:
