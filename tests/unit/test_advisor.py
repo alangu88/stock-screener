@@ -4,6 +4,7 @@ from src.config import Settings
 from src.screener.advisor import (
     add_sizing,
     analysis_lookup,
+    confirmation_add,
     core_rebalance,
     individual_cap_state,
     is_core,
@@ -14,6 +15,7 @@ from src.screener.advisor import (
     recommendation_rows,
     rotation_candidates,
     satellite_action,
+    suggested_add,
 )
 from src.screener.holdings import AllocationStats
 from src.screener.sizing import PositionSizing
@@ -73,6 +75,69 @@ def test_add_sizing_trims_to_headroom():
     trimmed = add_sizing(100_000, SETTINGS, row, 0.0, open_risk_pct=near_cap)
     assert trimmed is not None and full is not None
     assert trimmed.shares < full.shares
+
+
+def test_suggested_add_scales_max_by_fraction():
+    sizing = PositionSizing(shares=10.0, dollars=1000.0, risk_dollars=50.0, weight=0.01,
+                            capped_by=None)
+    half = Settings(suggested_add_fraction=0.5)
+    result = suggested_add(sizing, half)
+    assert result is not None
+    shares, dollars = result
+    assert shares == 5.0
+    assert dollars == 500.0
+
+
+def test_suggested_add_none_when_no_sizing():
+    assert suggested_add(None, SETTINGS) is None
+
+
+def test_suggested_add_none_when_shares_nonpositive():
+    sizing = PositionSizing(shares=0.0, dollars=0.0, risk_dollars=0.0, weight=0.0, capped_by=None)
+    assert suggested_add(sizing, SETTINGS) is None
+
+
+def test_suggested_add_none_when_fraction_rounds_to_zero():
+    sizing = PositionSizing(shares=0.001, dollars=0.1, risk_dollars=0.0, weight=0.0,
+                            capped_by=None)
+    tiny = Settings(suggested_add_fraction=0.1)
+    assert suggested_add(sizing, tiny) is None
+
+
+def test_confirmation_add_stages_remainder_at_trigger_price():
+    sizing = PositionSizing(shares=10.0, dollars=1000.0, risk_dollars=50.0, weight=0.01,
+                            capped_by=None)
+    settings = Settings(suggested_add_fraction=0.5, suggested_add_trigger_r=1.0)
+    result = confirmation_add(sizing, settings, entry=100.0, stop=90.0)
+    assert result is not None
+    remaining, confirm_price = result
+    assert remaining == 5.0  # max 10 - starter 5
+    assert confirm_price == 110.0  # entry + 1R * (entry - stop) = 100 + 10
+
+
+def test_confirmation_add_respects_custom_trigger():
+    sizing = PositionSizing(shares=10.0, dollars=1000.0, risk_dollars=50.0, weight=0.01,
+                            capped_by=None)
+    settings = Settings(suggested_add_fraction=0.5, suggested_add_trigger_r=0.5)
+    result = confirmation_add(sizing, settings, entry=100.0, stop=90.0)
+    assert result is not None
+    assert result[1] == 105.0  # entry + 0.5R * 10
+
+
+def test_confirmation_add_none_when_no_sizing_or_bad_levels():
+    settings = Settings()
+    assert confirmation_add(None, settings, 100.0, 90.0) is None
+    sizing = PositionSizing(shares=10.0, dollars=1000.0, risk_dollars=50.0, weight=0.01,
+                            capped_by=None)
+    assert confirmation_add(sizing, settings, entry=100.0, stop=100.0) is None
+    assert confirmation_add(sizing, settings, entry=None, stop=90.0) is None
+
+
+def test_confirmation_add_none_when_starter_is_full_size():
+    sizing = PositionSizing(shares=10.0, dollars=1000.0, risk_dollars=50.0, weight=0.01,
+                            capped_by=None)
+    full = Settings(suggested_add_fraction=1.0)
+    assert confirmation_add(sizing, full, entry=100.0, stop=90.0) is None
 
 
 def test_portfolio_open_risk_excludes_core():

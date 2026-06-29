@@ -323,7 +323,14 @@ Estimates are informational — your broker's cash remains the source of truth, 
 nothing is credited automatically.
 
 Position sizing uses **1% account risk per trade** (`SCREENER_RISK_PER_TRADE`),
-capped by the per-name weight limit. Core allocation targets **60–70%**
+capped by the per-name weight limit. Every add shows a risk-based **Max add**
+(the ceiling) alongside a **Suggested add** starter tranche — by default half
+the max (`SCREENER_SUGGESTED_ADD_FRACTION`, `0 < f <= 1`) — entered now, with the
+remainder added once the trade is up **+1R** (`SCREENER_SUGGESTED_ADD_TRIGGER_R`)
+and the stop moved to breakeven. Backtesting (`scripts/backtest_scalein.py`)
+found this staged entry roughly halves drawdown versus committing full size at
+once, while adding earlier (+0.5R) or never completing the add both underperform.
+Core allocation targets **60–70%**
 (`SCREENER_CORE_ALLOCATION_MIN` / `_MAX`), and the app flags when you exceed the
 **individual-stock cap** (`SCREENER_MAX_INDIVIDUAL_STOCKS`, ETFs excluded).
 Recommended Adds uses tight gates by default (confidence ≥ 85, R/R ≥ 2.5).

@@ -35,6 +35,7 @@ from src.screener.advisor import (  # noqa: E402
     _isna,
     add_sizing,
     analysis_lookup,
+    confirmation_add,
     core_action,
     core_rebalance,
     is_core,
@@ -43,6 +44,7 @@ from src.screener.advisor import (  # noqa: E402
     portfolio_open_risk,
     rotation_candidates,
     satellite_action,
+    suggested_add,
 )
 from src.screener.engine import FilterConfig, ScreenerEngine  # noqa: E402
 from src.screener.exposure import look_through_exposure  # noqa: E402
@@ -253,10 +255,19 @@ def _action_plan_section(
             sizing = add_sizing(
                 account_value, settings, r.to_dict(), 0.0, open_risk_pct, cash_available=cash,
             )
-            size_txt = (
-                f", add {_num(sizing.shares, 3)} sh \u2248 {_money(sizing.dollars)}"
-                if sizing and sizing.shares > 0 else ''
-            )
+            sugg = suggested_add(sizing, settings)
+            conf = confirmation_add(sizing, settings, r.get('Entry'), r.get('Stop'))
+            if sugg and sizing:
+                size_txt = f", add {_num(sugg[0], 3)} sh now ≈ {_money(sugg[1])}"
+                if conf:
+                    size_txt += (
+                        f"; add {_num(conf[0], 3)} more at {_money(conf[1])} "
+                        f"(+{_num(settings.suggested_add_trigger_r, 1)}R), stop→breakeven"
+                    )
+                else:
+                    size_txt += f" (max {_num(sizing.shares, 3)})"
+            else:
+                size_txt = ''
             buys.append(
                 f"\U0001f7e2 {r['Ticker']} \u2014 {_text(r.get('Setup'))} near {_money(r.get('Entry'))} "
                 f"(R/R {_num(r.get('R/R'))}, conf {_int(r.get('Confidence'))}{tag}{size_txt})"
@@ -290,8 +301,12 @@ def _legend_section(settings: Settings) -> str:
         f'capped so no single position exceeds {_pct(settings.max_position_weight)} of the '
         'account, and further capped by your available cash. It is **not a recommendation to '
         'add**: it does not account for sector/theme concentration or your single-stock cap. '
-        'A dash means no room to add (already at the weight cap, no cash) or no valid level.\n'
-        '- **Sleeve** \u2014 **Core** = long-term anchor (held through noise); **Satellite** = '
+        'A dash means no room to add (already at the weight cap, no cash) or no valid level.\n'        '- **Suggested add** — a starter tranche, '
+        f'{_pct(settings.suggested_add_fraction)} of the max, to enter with now; add the '
+        f'remainder once the trade is up +{_num(settings.suggested_add_trigger_r, 1)}R and move '
+        'the stop to breakeven. Backtests show this staged entry roughly halves drawdown versus '
+        'committing full size at once, while adding earlier or never completing the add both do '
+        'worse. Bounded by the same risk, weight, and cash caps.\n'        '- **Sleeve** \u2014 **Core** = long-term anchor (held through noise); **Satellite** = '
         'tactical position managed with the trade plan.\n'
         '- **% vs 200d** \u2014 distance above/below the 200-day average; the primary trend gauge. '
         'Negative means the long-term trend has rolled over.\n'
@@ -311,7 +326,8 @@ def _holdings_section(
     if show_acct:
         headers.append('Account')
     headers += ['Sleeve', 'Shares', 'Price', '% vs 200d', 'Value', 'Weight', 'P&L %',
-                'Entry', 'Stop', 'Target', 'R/R', 'R now', '% to stop', 'Max add (risk)', 'Action']
+                'Entry', 'Stop', 'Target', 'R/R', 'R now', '% to stop', 'Max add (risk)',
+                'Suggested add', 'Action']
     ordered = monitor.copy()
     ordered['_core'] = ordered['Sleeve'].map(is_core)
     ordered = ordered.sort_values(
@@ -326,6 +342,7 @@ def _holdings_section(
         actionable = bool(a.get('Actionable', False))
         if core:
             add_txt = '\u2014'
+            sugg_txt = '\u2014'
             action = core_action(r)
         else:
             sizing = add_sizing(account_value, settings, a, current_value, open_risk_pct,
@@ -337,6 +354,8 @@ def _holdings_section(
                 if can_add and sizing and sizing.shares > 0
                 else '\u2014'
             )
+            sugg = suggested_add(sizing, settings) if can_add else None
+            sugg_txt = _num(sugg[0], 3) if sugg else '\u2014'
         r_now = open_r_multiple(r.get('Price'), a.get('Entry'), a.get('Stop'))
         to_stop = pct_to_stop(r.get('Price'), a.get('Stop'))
         row = [ticker]
@@ -357,6 +376,7 @@ def _holdings_section(
             _num(r_now, 1) if r_now is not None else '\u2014',
             _pct(to_stop),
             add_txt,
+            sugg_txt,
             action,
         ]
         rows.append(row)
@@ -369,7 +389,7 @@ def _watchlist_section(
 ) -> str:
     """Followed (unheld) names, same plan columns as Holdings for consistency."""
     headers = ['Ticker', 'Price', 'Setup', 'Conf', 'Entry', 'Stop', 'Target',
-               'R/R', 'Max add (risk)', 'Action']
+               'R/R', 'Max add (risk)', 'Suggested add', 'Action']
     rows = []
     for _, r in watch_monitor.iterrows():
         ticker = str(r['Ticker'])
@@ -377,6 +397,8 @@ def _watchlist_section(
         actionable = bool(a.get('Actionable', False))
         sizing = add_sizing(account_value, settings, a, 0.0, open_risk_pct, cash_available=cash)
         add_txt = _num(sizing.shares, 3) if sizing and sizing.shares > 0 else '\u2014'
+        sugg = suggested_add(sizing, settings)
+        sugg_txt = _num(sugg[0], 3) if sugg else '\u2014'
         action = 'Buy candidate \u2014 setup live' if actionable else 'Watch \u2014 no setup yet'
         rows.append([
             ticker,
@@ -388,6 +410,7 @@ def _watchlist_section(
             _money(a.get('Target')),
             _num(a.get('R/R')),
             add_txt,
+            sugg_txt,
             action,
         ])
     return '## Watchlist\n\n' + _md_table(headers, rows)
@@ -410,7 +433,7 @@ def _recommendations_section(
         )
     current_values = current_values or {}
     headers = ['Ticker', 'Company', 'Setup', 'Type', 'Conf', 'R/R',
-               'Entry', 'Stop', 'Target', 'Rank', 'Max add (risk)', 'Add $']
+               'Entry', 'Stop', 'Target', 'Rank', 'Max add (risk)', 'Suggested add', 'Add $']
     rows = []
     for _, r in recs.iterrows():
         ticker = str(r['Ticker'])
@@ -419,6 +442,7 @@ def _recommendations_section(
             current_value=current_values.get(ticker, 0.0), open_risk_pct=open_risk_pct,
             cash_available=cash,
         )
+        sugg = suggested_add(sizing, settings)
         rows.append([
             ticker,
             _text(r.get('Company Name')),
@@ -431,13 +455,15 @@ def _recommendations_section(
             _money(r.get('Target')),
             _num(r.get('Rank Score')),
             _num(sizing.shares, 3) if sizing else '\u2014',
-            _money(sizing.dollars) if sizing else '\u2014',
+            _num(sugg[0], 3) if sugg else '\u2014',
+            _money(sugg[1]) if sugg else '\u2014',
         ])
     note = ''
     if cash is not None:
         note = (
             f'\n\n_Add sizes are capped to your {_money(max(cash, 0.0))} cash on hand; '
-            'amounts are per-name, so you cannot take every add at once._'
+            'amounts are per-name, so you cannot take every add at once. **Add $** is the '
+            'starter tranche (Suggested add \u00d7 price)._'
         )
     return '## Recommended adds\n\n' + _md_table(headers, rows) + note
 

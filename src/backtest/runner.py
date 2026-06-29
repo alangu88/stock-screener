@@ -21,7 +21,13 @@ import pandas as pd
 
 from src.analysis.features import MIN_BARS, compute_feature_panel, features_at
 from src.analysis.indicators import atr, sma
-from src.backtest.stops import StopParams, TradeResult, simulate_trade
+from src.backtest.stops import (
+    ScaleInParams,
+    StopParams,
+    TradeResult,
+    simulate_scalein,
+    simulate_trade,
+)
 from src.screener.ranking import confidence_score
 from src.screener.setups import AVOID, detect_setup
 from src.screener.strategy import StrategyConfig
@@ -263,3 +269,60 @@ def default_variants() -> list[StopParams]:
             target_exit=False,
         ),
     ]
+
+
+def scalein_variants() -> list[ScaleInParams]:
+    """Entry-staging sweep on one fixed exit (chandelier 3x + breakeven@1R).
+
+    Holding the exit constant isolates the *suggested-add* decision: full size at
+    entry vs. a starter tranche that completes only on confirmation, plus a
+    starter-only control that shows the cost of never adding.
+    """
+    exit_kw = dict(chandelier_atr_mult=3.0, breakeven_r=1.0, target_exit=False)
+    return [
+        ScaleInParams(name='Full now (1.0)', starter_frac=1.0, **exit_kw),
+        ScaleInParams(name='Starter 0.5 + add@0.5R', starter_frac=0.5,
+                      add_trigger_r=0.5, **exit_kw),
+        ScaleInParams(name='Starter 0.5 + add@1.0R', starter_frac=0.5,
+                      add_trigger_r=1.0, **exit_kw),
+        ScaleInParams(name='Starter 0.4 + add@0.5R', starter_frac=0.4,
+                      add_trigger_r=0.5, **exit_kw),
+        ScaleInParams(name='Starter 0.6 + add@0.5R', starter_frac=0.6,
+                      add_trigger_r=0.5, **exit_kw),
+        ScaleInParams(name='Starter 0.7 + add@1.0R', starter_frac=0.7,
+                      add_trigger_r=1.0, **exit_kw),
+        ScaleInParams(name='Starter 0.5 (no add)', starter_frac=0.5,
+                      add_trigger_r=None, **exit_kw),
+    ]
+
+
+def simulate_scalein_entries(
+    entries: list[Entry],
+    histories: dict[str, pd.DataFrame],
+    variants: list[ScaleInParams],
+    atr_period: int,
+) -> dict[str, list[TradeResult]]:
+    """Run every entry through every scale-in variant. Returns variant -> results."""
+    results: dict[str, list[TradeResult]] = {v.name: [] for v in variants}
+    atr_cache: dict[str, pd.Series] = {}
+    for e in entries:
+        df = histories.get(e.ticker)
+        if df is None or e.date not in df.index:
+            continue
+        atr_series = atr_cache.get(e.ticker)
+        if atr_series is None:
+            close_full = df['Close']
+            high_full = df['High'] if 'High' in df.columns else close_full
+            low_full = df['Low'] if 'Low' in df.columns else close_full
+            atr_series = atr(high_full, low_full, close_full, atr_period).shift(1)
+            atr_cache[e.ticker] = atr_series
+        high, low, close, atr_prev = _forward_arrays(df, e.date, atr_period, atr_series)
+        if len(high) == 0:
+            continue
+        for v in variants:
+            res = simulate_scalein(
+                e.entry, e.initial_stop, e.target, high, low, close, atr_prev, v
+            )
+            if res is not None:
+                results[v.name].append(res)
+    return results

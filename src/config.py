@@ -49,6 +49,8 @@ class Settings:
     rec_min_confidence: float = 70.0
     rec_min_reward_risk: float = 2.5
     watchlist_auto_confidence: float = 80.0  # adds at/above this confidence auto-join watchlist.txt
+    suggested_add_fraction: float = 0.5  # starter tranche as a fraction of the max add (scale-in)
+    suggested_add_trigger_r: float = 1.0  # add the remainder once the trade is +this many R
 
     # Swing-trading management for satellites (off by default; cores unaffected)
     swing_mode: bool = False
@@ -76,6 +78,8 @@ class Settings:
             'swing_time_stop_bars': self.swing_time_stop_bars,
             'earnings_blackout_days': self.earnings_blackout_days,
             'dividend_lookback_days': self.dividend_lookback_days,
+            'suggested_add_fraction': self.suggested_add_fraction,
+            'suggested_add_trigger_r': self.suggested_add_trigger_r,
         }
         for name, value in positive.items():
             if value <= 0:
@@ -101,6 +105,7 @@ class Settings:
             'max_portfolio_risk': self.max_portfolio_risk,
             'core_allocation_min': self.core_allocation_min,
             'core_allocation_max': self.core_allocation_max,
+            'suggested_add_fraction': self.suggested_add_fraction,
         }
         for name, value in fractions.items():
             if not 0.0 <= value <= 1.0:
@@ -156,6 +161,8 @@ def load_settings() -> Settings:
         ('rec_min_confidence', 'REC_MIN_CONFIDENCE', float),
         ('rec_min_reward_risk', 'REC_MIN_REWARD_RISK', float),
         ('watchlist_auto_confidence', 'WATCHLIST_AUTO_CONFIDENCE', float),
+        ('suggested_add_fraction', 'SUGGESTED_ADD_FRACTION', float),
+        ('suggested_add_trigger_r', 'SUGGESTED_ADD_TRIGGER_R', float),
         ('swing_mode', 'SWING_MODE', _as_bool),
         ('swing_time_stop_bars', 'SWING_TIME_STOP_BARS', int),
         ('swing_extended_atr', 'SWING_EXTENDED_ATR', float),

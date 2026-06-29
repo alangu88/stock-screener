@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from src.backtest.runner import Stats, summarize
-from src.backtest.stops import StopParams, TradeResult, simulate_trade
+from src.backtest.stops import (
+    ScaleInParams,
+    StopParams,
+    TradeResult,
+    simulate_scalein,
+    simulate_trade,
+)
 
 
 def _flat_atr(n: int, value: float = 1.0) -> list[float]:
@@ -134,6 +140,65 @@ def test_degenerate_inputs_return_none():
                           StopParams(name='x')) is None
     assert simulate_trade(100.0, 90.0, 130.0, [], [], [], [],
                           StopParams(name='x')) is None
+
+
+def test_scalein_full_size_matches_simulate_trade():
+    # starter_frac=1.0 with no add must reproduce a one-unit trailing trade.
+    highs = [120.0, 140.0, 150.0, 145.0, 130.0]
+    lows = [110.0, 130.0, 145.0, 130.0, 125.0]
+    closes = [118.0, 138.0, 148.0, 132.0, 126.0]
+    base = simulate_trade(
+        100.0, 90.0, 130.0, highs, lows, closes, _flat_atr(5, 1.0),
+        StopParams(name='chand', chandelier_atr_mult=2.0, target_exit=False),
+    )
+    staged = simulate_scalein(
+        100.0, 90.0, 130.0, highs, lows, closes, _flat_atr(5, 1.0),
+        ScaleInParams(name='full', starter_frac=1.0, chandelier_atr_mult=2.0, target_exit=False),
+    )
+    assert base is not None and staged is not None
+    assert round(staged.r_multiple, 9) == round(base.r_multiple, 9)
+
+
+def test_scalein_unconfirmed_failure_loses_only_the_starter():
+    # Price falls straight to the initial stop without ever reaching +0.5R, so
+    # the add never fills: a half starter loses 0.5R instead of a full 1R.
+    res = simulate_scalein(
+        100.0, 90.0, 130.0,
+        high=[101.0, 95.0],
+        low=[99.0, 88.0],
+        close=[100.0, 90.0],
+        atr_prev=_flat_atr(2, 50.0),
+        params=ScaleInParams(name='stage', starter_frac=0.5, add_trigger_r=0.5,
+                             target_exit=True),
+    )
+    assert res is not None
+    assert res.exit_reason == 'stop'
+    assert round(res.r_multiple, 6) == -0.5
+
+
+def test_scalein_confirmed_winner_pays_add_slippage():
+    # Reaches +0.5R (price 105) so the add fills there, then runs to the 130
+    # target (+3R). Full size would book 3.0R; staging books 3.0 - 0.5*0.5 = 2.75R.
+    res = simulate_scalein(
+        100.0, 90.0, 130.0,
+        high=[106.0, 132.0],
+        low=[100.0, 120.0],
+        close=[105.0, 130.0],
+        atr_prev=_flat_atr(2, 50.0),  # huge ATR disables the chandelier path
+        params=ScaleInParams(name='stage', starter_frac=0.5, add_trigger_r=0.5,
+                             add_raise_be=False, target_exit=True),
+    )
+    assert res is not None
+    assert res.exit_reason == 'target'
+    assert round(res.r_multiple, 6) == 2.75
+
+
+def test_scalein_rejects_bad_starter_fraction():
+    bars = ([101.0], [99.0], [100.0], [1.0])
+    assert simulate_scalein(100.0, 90.0, 130.0, *bars,
+                            ScaleInParams(name='x', starter_frac=0.0)) is None
+    assert simulate_scalein(100.0, 90.0, 130.0, *bars,
+                            ScaleInParams(name='x', starter_frac=1.5)) is None
 
 
 def test_summarize_computes_expectancy_and_profit_factor():

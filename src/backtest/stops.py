@@ -47,6 +47,36 @@ class StopParams:
 
 
 @dataclass(frozen=True)
+class ScaleInParams:
+    """Entry-staging policy layered on a shared trailing-exit manager.
+
+    The position is built in up to two tranches: ``starter_frac`` of a full unit
+    at the entry price, then the remaining ``1 - starter_frac`` added once the
+    trade's favorable excursion first reaches ``add_trigger_r`` (a confirmation
+    that the entry is working). When ``add_trigger_r`` is ``None`` only the
+    starter is ever deployed. All tranches share one stop and one exit; the
+    realized result is reported in R-multiples of the initial per-share risk,
+    relative to a fully deployed one-unit position (so ``starter_frac == 1`` with
+    no add reproduces :func:`simulate_trade` with no partial).
+
+    The exit levers (``chandelier_atr_mult``, ``breakeven_r``,
+    ``time_stop_bars`` / ``min_progress_r``, ``target_exit``) mirror
+    :class:`StopParams` and manage the combined position identically across
+    variants, so a comparison isolates the *entry-staging* decision.
+    """
+
+    name: str
+    starter_frac: float = 1.0
+    add_trigger_r: float | None = None
+    add_raise_be: bool = True  # raise the stop to breakeven once the add fills
+    chandelier_atr_mult: float | None = None
+    breakeven_r: float | None = None
+    time_stop_bars: int | None = None
+    min_progress_r: float = 0.5
+    target_exit: bool = True
+
+
+@dataclass(frozen=True)
 class TradeResult:
     """Outcome of one simulated trade, in initial-risk (R) units."""
 
@@ -143,3 +173,93 @@ def simulate_trade(
     # Ran out of data: mark to the last close.
     realized_r += remaining * r_at(float(close[-1]))
     return TradeResult(realized_r, n, 'eod', mae_r, mfe_r)
+
+
+def simulate_scalein(
+    entry: float,
+    initial_stop: float,
+    target: float,
+    high: Sequence[float],
+    low: Sequence[float],
+    close: Sequence[float],
+    atr_prev: Sequence[float],
+    params: ScaleInParams,
+) -> TradeResult | None:
+    """Simulate a staged (starter + confirmation add) long trade forward.
+
+    A ``starter_frac`` tranche fills at ``entry``; the remaining tranche fills at
+    ``entry + add_trigger_r * risk`` only if that favorable level is reached
+    before the stop, after which the stop optionally ratchets to breakeven. Both
+    tranches share one stop and exit at the same price, so the realized R is the
+    fraction-weighted sum of each tranche's ``(exit - cost) / risk``.
+
+    Returns ``None`` for a degenerate setup (``initial_stop >= entry``, no forward
+    bars, or ``starter_frac`` outside ``(0, 1]``).
+    """
+    risk = entry - initial_stop
+    if risk <= 0 or len(high) == 0 or not 0.0 < params.starter_frac <= 1.0:
+        return None
+
+    n = len(high)
+    stop = initial_stop
+    high_water = entry
+    mae_r = 0.0
+    mfe_r = 0.0
+
+    starter_units = params.starter_frac
+    add_units = 1.0 - params.starter_frac
+    add_price = entry + (params.add_trigger_r or 0.0) * risk
+    can_add = add_units > 1e-12 and params.add_trigger_r is not None
+    added = False
+
+    def r_at(price: float) -> float:
+        return (price - entry) / risk
+
+    def book(exit_price: float) -> float:
+        """Fraction-weighted realized R of every deployed tranche at one price."""
+        total = starter_units * r_at(exit_price)
+        if added:
+            total += add_units * (exit_price - add_price) / risk
+        return total
+
+    for i in range(n):
+        # 1) Raise the stop using only pre-bar information.
+        if params.chandelier_atr_mult is not None:
+            stop = max(stop, high_water - params.chandelier_atr_mult * float(atr_prev[i]))
+        if params.breakeven_r is not None and mfe_r >= params.breakeven_r:
+            stop = max(stop, entry)
+
+        bar_high = float(high[i])
+        bar_low = float(low[i])
+        bar_close = float(close[i])
+
+        # 2) Stop first (pessimistic): a fast failure exits with only the starter.
+        if bar_low <= stop:
+            return TradeResult(book(stop), i + 1, 'stop', min(mae_r, r_at(bar_low)), mfe_r)
+
+        # 3) Confirmation add: deploy the remainder once price proves the entry.
+        if can_add and not added and bar_high >= add_price:
+            added = True
+            if params.add_raise_be:
+                stop = max(stop, entry)
+
+        # 4) Structural target closes the whole position.
+        if params.target_exit and bar_high >= target:
+            return TradeResult(book(target), i + 1, 'target', mae_r, max(mfe_r, r_at(target)))
+
+        # 5) Update excursions with this bar.
+        high_water = max(high_water, bar_high)
+        mfe_r = max(mfe_r, r_at(bar_high))
+        mae_r = min(mae_r, r_at(bar_low))
+
+        # 6) Time stop: recycle dead money at the close.
+        if (
+            params.time_stop_bars is not None
+            and i + 1 >= params.time_stop_bars
+            and mfe_r < params.min_progress_r
+        ):
+            return TradeResult(book(bar_close), i + 1, 'time', mae_r, mfe_r)
+
+    # Ran out of data: mark to the last close.
+    return TradeResult(book(float(close[-1])), n, 'eod', mae_r, mfe_r)
+

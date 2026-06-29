@@ -13,7 +13,7 @@ import pandas as pd
 
 from src.config import Settings
 from src.screener.holdings import CORE, AllocationStats, count_individual_stocks
-from src.screener.sizing import PositionSizing, suggest_add_size
+from src.screener.sizing import SHARE_PRECISION, PositionSizing, suggest_add_size
 
 
 def _isna(value) -> bool:
@@ -100,6 +100,50 @@ def add_sizing(
         max_position_weight=settings.max_position_weight,
         cash_available=cash_available,
     )
+
+
+def suggested_add(sizing: PositionSizing | None, settings: Settings) -> tuple[float, float] | None:
+    """Starter-tranche size to *actually* enter with, as ``(shares, dollars)``.
+
+    The ``Max add (risk)`` is a ceiling; this scales it by
+    ``settings.suggested_add_fraction`` so a first entry is staged (e.g. half now,
+    the rest on confirmation). Returns ``None`` when there is nothing to add.
+    """
+    if sizing is None or sizing.shares <= 0:
+        return None
+    shares = round(sizing.shares * settings.suggested_add_fraction, SHARE_PRECISION)
+    if shares <= 0:
+        return None
+    per_share = sizing.dollars / sizing.shares
+    return shares, shares * per_share
+
+
+def confirmation_add(
+    sizing: PositionSizing | None, settings: Settings, entry, stop,
+) -> tuple[float, float] | None:
+    """The second tranche to complete the position once the trade confirms.
+
+    Backtesting (``scripts/backtest_scalein.py``) found that staging an entry --
+    a starter now, the remainder added only after the trade is up
+    ``suggested_add_trigger_r`` (default +1R) with the stop moved to breakeven --
+    roughly halves drawdown versus committing full size at once, while adding too
+    early (+0.5R) or never completing the add both underperform.
+
+    Returns ``(remaining_shares, confirm_price)`` -- the shares still to add to
+    reach the risk-based max and the price that confirms them -- or ``None`` when
+    there is no staged remainder (no sizing, or the starter already is the max).
+    """
+    starter = suggested_add(sizing, settings)
+    if starter is None or sizing is None or _isna(entry) or _isna(stop):
+        return None
+    entry_f, stop_f = float(entry), float(stop)
+    if entry_f <= stop_f:
+        return None
+    remaining = round(max(sizing.shares - starter[0], 0.0), SHARE_PRECISION)
+    if remaining <= 0:
+        return None
+    confirm_price = entry_f + settings.suggested_add_trigger_r * (entry_f - stop_f)
+    return remaining, confirm_price
 
 
 def satellite_action(
@@ -252,6 +296,7 @@ def recommendation_rows(
             current_value=current_values.get(ticker, 0.0), open_risk_pct=open_risk_pct,
             cash_available=cash_available,
         )
+        sugg = suggested_add(sizing, settings)
         rows.append({
             'Ticker': ticker,
             'Company': r.get('Company Name'),
@@ -265,6 +310,7 @@ def recommendation_rows(
             'Rank Score': r.get('Rank Score'),
             'Add Shares': sizing.shares if sizing else None,
             'Add $': sizing.dollars if sizing else None,
+            'Suggested': sugg[0] if sugg else None,
         })
     return pd.DataFrame(rows)
 

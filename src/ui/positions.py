@@ -21,6 +21,7 @@ from src.screener.advisor import (
     pct_to_target,
     portfolio_open_risk,
     satellite_action,
+    suggested_add,
 )
 from src.screener.engine import FilterConfig, ScreenerEngine
 from src.screener.holdings import (
@@ -79,6 +80,7 @@ _PLAN_FORMATTERS = {
     'Unreal P&L %': percent,
     'Add Shares': shares,
     'Add $': money,
+    'Suggested': shares,
     '% to Stop': percent,
     '% to Target': percent,
     'R': score,
@@ -298,6 +300,7 @@ def _render_satellite_panel(
         actionable = bool(a.get('Actionable', False))
         sizing = add_sizing(account_value, settings, a, current_value, open_risk_pct,
                             cash_available=cash)
+        sugg = suggested_add(sizing, settings)
         row = {
             'Ticker': ticker,
             'Account': r.get('Account'),
@@ -315,6 +318,7 @@ def _render_satellite_panel(
             'R': open_r_multiple(r['Price'], a.get('Entry'), a.get('Stop')),
             'Add Shares': sizing.shares if sizing else None,
             'Add $': sizing.dollars if sizing else None,
+            'Suggested': sugg[0] if sugg else None,
             'Earnings': 'soon' if ticker in earnings else '',
             'Action': satellite_action(r, a, sizing, actionable, settings),
         }
@@ -339,6 +343,7 @@ def _render_watchlist_panel(
         a = lookup.get(ticker, {})
         actionable = bool(a.get('Actionable', False))
         sizing = add_sizing(account_value, settings, a, 0.0, open_risk_pct, cash_available=cash)
+        sugg = suggested_add(sizing, settings)
         rows.append({
             'Ticker': ticker,
             'Price': r['Price'],
@@ -349,6 +354,7 @@ def _render_watchlist_panel(
             'Confidence': a.get('Confidence'),
             'Add Shares': sizing.shares if sizing else None,
             'Add $': sizing.dollars if sizing else None,
+            'Suggested': sugg[0] if sugg else None,
             'Hint': 'Actionable' if actionable else 'Watch',
         })
     frame = pd.DataFrame(rows)

@@ -34,6 +34,7 @@ _REC_FORMATTERS = {
     'Rank Score': score,
     'Add Shares': shares,
     'Add $': money,
+    'Suggested': shares,
 }
 
 _ROTATION_FORMATTERS = {

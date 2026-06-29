@@ -24,6 +24,7 @@ def test_defaults_are_valid() -> None:
         ('rec_min_reward_risk', 0.0),
         ('fundamentals_ttl_hours', 0),
         ('dividend_lookback_days', 0),
+        ('suggested_add_trigger_r', 0.0),
     ],
 )
 def test_non_positive_fields_rejected(field: str, value: object) -> None:
@@ -41,6 +42,16 @@ def test_negative_fields_rejected(field: str) -> None:
 def test_fraction_bounds_enforced(value: float) -> None:
     with pytest.raises(ConfigError):
         dataclasses.replace(Settings(), core_allocation=value)
+
+
+@pytest.mark.parametrize('value', [0.0, 1.01])
+def test_suggested_add_fraction_bounds_enforced(value: float) -> None:
+    with pytest.raises(ConfigError):
+        dataclasses.replace(Settings(), suggested_add_fraction=value)
+
+
+def test_suggested_add_fraction_allows_full() -> None:
+    assert dataclasses.replace(Settings(), suggested_add_fraction=1.0).suggested_add_fraction == 1.0
 
 
 def test_core_allocation_band_must_be_ordered() -> None:
