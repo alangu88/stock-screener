@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -78,14 +78,23 @@ class YahooFinanceClient:
         period: str = '2y',
         interval: str = '1d',
         force_refresh: bool = False,
+        refresh_tickers: Iterable[str] | None = None,
     ) -> dict[str, pd.DataFrame]:
+        """Fetch daily history, serving fresh data from the cache where possible.
+
+        ``force_refresh`` bypasses the cache for every ticker. ``refresh_tickers``
+        bypasses it for just that subset -- used to keep a small priority set
+        (held + watchlist names) live during trading hours while the broader
+        universe stays on the normal cache.
+        """
         sorted_tickers = sorted(set(tickers))
+        force_set = {t.upper() for t in refresh_tickers} if refresh_tickers else set()
         result: dict[str, pd.DataFrame] = {}
         missing: list[str] = []
 
         for ticker in sorted_tickers:
             cache_key = f'history:{ticker}:{period}:{interval}'
-            if not force_refresh:
+            if not force_refresh and ticker.upper() not in force_set:
                 cached = self.cache.get(cache_key)
                 if cached is not None:
                     result[ticker] = cached
@@ -195,7 +204,7 @@ class YahooFinanceClient:
             quote_type=info.get('quoteType'),
         )
 
-        self.cache.set(f'fundamentals:{ticker}', entry.__dict__, ttl_seconds=self.settings.cache_ttl_hours * 3600)
+        self.cache.set(f'fundamentals:{ticker}', entry.__dict__, ttl_seconds=self.settings.fundamentals_ttl_hours * 3600)
         return entry
 
     def fetch_earnings_dates(self, tickers: list[str], force_refresh: bool = False) -> dict[str, str]:

@@ -25,7 +25,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.config import Settings, load_settings  # noqa: E402
 from src.data.cache import SQLiteCache  # noqa: E402
-from src.data.market import earnings_soon, regime_risk_on  # noqa: E402
+from src.data.market import earnings_soon, market_is_open, regime_risk_on  # noqa: E402
 from src.data.universe import UniverseResult, load_sp500_universe  # noqa: E402
 from src.data.yahoo_client import YahooFinanceClient  # noqa: E402
 from src.export.markdown_format import number as _fmt_number  # noqa: E402
@@ -111,6 +111,33 @@ def _read(path: Path) -> str:
 
 def _followed_tickers() -> list[str]:
     return [e.ticker for e in parse_portfolio(_read(WATCHLIST_FILE))]
+
+
+def _auto_add_to_watchlist(
+    recs: pd.DataFrame, held: list[str], exclude: set[str], settings: Settings
+) -> list[str]:
+    """Persist high-confidence recommended adds to ``watchlist.txt``.
+
+    Names at or above ``watchlist_auto_confidence`` that are not already held,
+    watched, or funds get appended so they carry forward to future runs.
+    Returns the tickers added (empty when there is nothing new).
+    """
+    if recs.empty:
+        return []
+    skip = {t.upper() for t in _followed_tickers()}
+    skip |= {t.upper() for t in held} | {t.upper() for t in exclude}
+    added: list[str] = []
+    for _, row in recs.iterrows():
+        ticker = str(row['Ticker']).upper()
+        conf = row.get('Confidence')
+        if ticker in skip or _isna(conf) or float(conf) < settings.watchlist_auto_confidence:
+            continue
+        added.append(ticker)
+        skip.add(ticker)
+    if added:
+        text = _read(WATCHLIST_FILE).rstrip('\n')
+        WATCHLIST_FILE.write_text(text + '\n' + '\n'.join(added) + '\n', encoding='utf-8')
+    return added
 
 
 def _etf_tickers(client: YahooFinanceClient, tickers: list[str]) -> set[str]:
@@ -589,7 +616,10 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
     held = [e.ticker for e in merged]
     watch = [t for t in _followed_tickers() if t not in set(held)]
     universe = [*held, *watch]
-    history = client.fetch_history(universe, period=HISTORY_PERIOD)
+    # Keep the portfolio + watchlist live intraday; the broad S&P universe used
+    # for recommendations stays on the normal cache to avoid Yahoo throttling.
+    refresh = universe if market_is_open() else None
+    history = client.fetch_history(universe, period=HISTORY_PERIOD, refresh_tickers=refresh)
     monitor = build_monitor(merged, history, settings)
     watch_monitor = build_monitor([PositionEntry(t, sleeve=SATELLITE) for t in watch], history, settings)
     account_value = parse_account_value(positions_text) or float(monitor['Value'].dropna().sum())
@@ -603,6 +633,7 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
     etfs = _etf_tickers(client, universe)
     recs = _screen_recommendations(engine, cache, watch, gate_config)
     rec_etfs = _etf_tickers(client, list(recs['Ticker'])) if not recs.empty else set()
+    auto_added = _auto_add_to_watchlist(recs, held, rec_etfs, settings)
 
     report = _build_report(
         generated_at=generated_at,
@@ -620,6 +651,8 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
     )
     status = (f'{len(monitor)} holding(s), {len(watch_monitor)} watch, '
               f'{len(recs)} recommendation(s).')
+    if auto_added:
+        status += f' Auto-added to watchlist: {", ".join(auto_added)}.'
     return report, status
 
 

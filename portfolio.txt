@@ -38,3 +38,4 @@ PLTR, satellite
 LRCX, satellite
 META, satellite
 XOM, satellite
+DELL, satellite

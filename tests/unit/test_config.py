@@ -22,6 +22,7 @@ def test_defaults_are_valid() -> None:
         ('atr_stop_multiplier', 0.0),
         ('rsi_period', -1),
         ('rec_min_reward_risk', 0.0),
+        ('fundamentals_ttl_hours', 0),
     ],
 )
 def test_non_positive_fields_rejected(field: str, value: object) -> None:
@@ -50,6 +51,12 @@ def test_core_allocation_band_must_be_ordered() -> None:
 def test_confidence_bounds_enforced(value: float) -> None:
     with pytest.raises(ConfigError):
         dataclasses.replace(Settings(), rec_min_confidence=value)
+
+
+@pytest.mark.parametrize('value', [-1.0, 101.0])
+def test_watchlist_auto_confidence_bounds_enforced(value: float) -> None:
+    with pytest.raises(ConfigError):
+        dataclasses.replace(Settings(), watchlist_auto_confidence=value)
 
 
 def test_load_settings_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:

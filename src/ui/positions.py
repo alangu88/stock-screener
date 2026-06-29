@@ -7,6 +7,7 @@ import streamlit as st
 
 from src.config import Settings
 from src.data.market import earnings_soon as _earnings_soon
+from src.data.market import market_is_open
 from src.data.market import regime_risk_on as _regime_risk_on
 from src.data.universe import UniverseResult
 from src.data.yahoo_client import YahooFinanceClient
@@ -181,7 +182,10 @@ def _analyze_positions(
     watch = [t for t in watchlist_tickers() if t not in held_set]
     all_tickers = held + watch
     with st.spinner(f'Analyzing {len(all_tickers)} symbol(s)...'):
-        history = client.fetch_history(all_tickers, period='2y')
+        # Held + watchlist names refresh live during trading hours; the rest of
+        # the screening universe stays on the normal cache.
+        refresh = all_tickers if market_is_open() else None
+        history = client.fetch_history(all_tickers, period='2y', refresh_tickers=refresh)
         monitor = build_monitor(merged, history, settings)
         watch_entries = [PositionEntry(t, sleeve=SATELLITE) for t in watch]
         watch_monitor = build_monitor(watch_entries, history, settings)

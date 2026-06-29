@@ -352,6 +352,7 @@ available variables. The most commonly adjusted values:
 | `SCREENER_MAX_RETRIES` | `4` | Yahoo request retry attempts |
 | `SCREENER_REQUEST_DELAY_SECONDS` | `0.25` | Throttle between requests |
 | `SCREENER_FUNDAMENTALS_MAX_WORKERS` | `8` | Fundamentals fetch concurrency |
+| `SCREENER_FUNDAMENTALS_TTL_HOURS` | `24` | Separate (longer) cache for slow-moving fundamentals; keep high to lower `CACHE_TTL_HOURS` for fresher prices without a fundamentals re-fetch storm |
 | `SCREENER_MIN_AVG_VOLUME` | `500000` | Liquidity gate |
 | `SCREENER_SMA_SHORT_WINDOW` / `SCREENER_SMA_LONG_WINDOW` | `50` / `200` | Trend MAs |
 | `SCREENER_EMA_WINDOW` | `20` | Fast EMA |
@@ -359,6 +360,7 @@ available variables. The most commonly adjusted values:
 | `SCREENER_CORE_ALLOCATION` | `0.70` | Core sleeve share of capital |
 | `SCREENER_CORE_SCORE_THRESHOLD` | `0.60` | Core vs Satellite cutoff |
 | `SCREENER_MAX_POSITION_WEIGHT` | `0.10` | Per-name position cap |
+| `SCREENER_WATCHLIST_AUTO_CONFIDENCE` | `80` | Recommended adds at/above this confidence auto-join `watchlist.txt` |
 
 See [`.env.example`](.env.example) for the complete list, including the daily
 snapshot variables.

@@ -6,7 +6,6 @@ import pandas as pd
 
 from src.analysis.features import MarketFeatures, compute_features
 from src.config import Settings
-from src.data.market import market_is_open
 from src.data.universe import UniverseResult
 from src.data.yahoo_client import Fundamentals, YahooFinanceClient
 from src.screener.portfolio import PortfolioConfig, assign_portfolio
@@ -172,11 +171,8 @@ class ScreenerEngine:
         allowed, _ = self.client.filter_allowed_exchanges(fundamentals)
         if not allowed:
             return None
-        # Prices must be live during trading hours; fundamentals barely move
-        # intraday, so they stay on the normal cache to avoid slow refetches.
-        refresh_prices = force_refresh or market_is_open()
-        history = self.client.fetch_history(allowed, period=HISTORY_PERIOD, force_refresh=refresh_prices)
-        benchmark_close = self._benchmark_close(refresh_prices)
+        history = self.client.fetch_history(allowed, period=HISTORY_PERIOD, force_refresh=force_refresh)
+        benchmark_close = self._benchmark_close(force_refresh)
         context = assess_market_context(benchmark_close, self.strategy)
         return _ScreenInputs(fundamentals, allowed, history, benchmark_close, context)
 

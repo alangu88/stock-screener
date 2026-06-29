@@ -22,6 +22,7 @@ class Settings:
     backoff_seconds: float = 1.0
     request_delay_seconds: float = 0.25
     fundamentals_max_workers: int = 8
+    fundamentals_ttl_hours: int = 24  # slow-moving metadata; kept long so hourly price refreshes stay cheap
 
     # Indicator windows (also drive the StrategyConfig defaults)
     min_avg_volume: int = 500_000
@@ -47,6 +48,7 @@ class Settings:
     max_individual_stocks: int = 10
     rec_min_confidence: float = 70.0
     rec_min_reward_risk: float = 2.5
+    watchlist_auto_confidence: float = 80.0  # adds at/above this confidence auto-join watchlist.txt
 
     # Swing-trading management for satellites (off by default; cores unaffected)
     swing_mode: bool = False
@@ -59,6 +61,7 @@ class Settings:
             'cache_ttl_hours': self.cache_ttl_hours,
             'max_retries': self.max_retries,
             'fundamentals_max_workers': self.fundamentals_max_workers,
+            'fundamentals_ttl_hours': self.fundamentals_ttl_hours,
             'rsi_period': self.rsi_period,
             'sma_short_window': self.sma_short_window,
             'sma_long_window': self.sma_long_window,
@@ -112,6 +115,12 @@ class Settings:
                 f'rec_min_confidence must be within [0, 100], got {self.rec_min_confidence!r}'
             )
 
+        if not 0.0 <= self.watchlist_auto_confidence <= 100.0:
+            raise ConfigError(
+                'watchlist_auto_confidence must be within [0, 100], got '
+                f'{self.watchlist_auto_confidence!r}'
+            )
+
 
 def load_settings() -> Settings:
     """Build :class:`Settings`, overriding defaults from ``SCREENER_*`` env vars."""
@@ -124,6 +133,7 @@ def load_settings() -> Settings:
         ('backoff_seconds', 'BACKOFF_SECONDS', float),
         ('request_delay_seconds', 'REQUEST_DELAY_SECONDS', float),
         ('fundamentals_max_workers', 'FUNDAMENTALS_MAX_WORKERS', int),
+        ('fundamentals_ttl_hours', 'FUNDAMENTALS_TTL_HOURS', int),
         ('min_avg_volume', 'MIN_AVG_VOLUME', int),
         ('rsi_period', 'RSI_PERIOD', int),
         ('sma_short_window', 'SMA_SHORT_WINDOW', int),
@@ -143,6 +153,7 @@ def load_settings() -> Settings:
         ('max_individual_stocks', 'MAX_INDIVIDUAL_STOCKS', int),
         ('rec_min_confidence', 'REC_MIN_CONFIDENCE', float),
         ('rec_min_reward_risk', 'REC_MIN_REWARD_RISK', float),
+        ('watchlist_auto_confidence', 'WATCHLIST_AUTO_CONFIDENCE', float),
         ('swing_mode', 'SWING_MODE', _as_bool),
         ('swing_time_stop_bars', 'SWING_TIME_STOP_BARS', int),
         ('swing_extended_atr', 'SWING_EXTENDED_ATR', float),
