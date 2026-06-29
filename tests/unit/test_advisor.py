@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from src.config import Settings
 from src.screener.advisor import (
@@ -6,12 +7,14 @@ from src.screener.advisor import (
     analysis_lookup,
     confirmation_add,
     core_rebalance,
+    extended_price,
     individual_cap_state,
     is_core,
     open_r_multiple,
     pct_to_stop,
     pct_to_target,
     portfolio_open_risk,
+    r_multiple_price,
     recommendation_rows,
     rotation_candidates,
     satellite_action,
@@ -250,6 +253,21 @@ def test_open_r_multiple():
     assert open_r_multiple(95.0, 100.0, 90.0) == -0.5
     assert open_r_multiple(120.0, 100.0, 100.0) is None
     assert open_r_multiple(None, 100.0, 90.0) is None
+
+
+def test_r_multiple_price():
+    # risk is 10 (entry 100, stop 90); +2R projects 20 above entry
+    assert r_multiple_price(100.0, 90.0, 2.0) == 120.0
+    assert r_multiple_price(100.0, 90.0, 1.0) == 110.0
+    assert r_multiple_price(100.0, 100.0, 2.0) is None  # non-positive risk
+    assert r_multiple_price(None, 90.0, 2.0) is None
+
+
+def test_extended_price():
+    # 10% above the 20-EMA at the default swing_extended_atr
+    assert extended_price(100.0, SETTINGS) == pytest.approx(110.0)
+    assert extended_price(None, SETTINGS) is None
+    assert extended_price(0.0, SETTINGS) is None
 
 
 

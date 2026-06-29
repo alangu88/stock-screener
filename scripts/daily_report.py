@@ -38,10 +38,12 @@ from src.screener.advisor import (  # noqa: E402
     confirmation_add,
     core_action,
     core_rebalance,
+    extended_price,
     is_core,
     open_r_multiple,
     pct_to_stop,
     portfolio_open_risk,
+    r_multiple_price,
     rotation_candidates,
     satellite_action,
     suggested_add,
@@ -393,6 +395,59 @@ def _holdings_section(
     return '## Holdings\n\n' + _md_table(headers, rows)
 
 
+def _scaleout_section(monitor: pd.DataFrame, lookup: dict, settings: Settings) -> str:
+    """Profit-taking ladder for satellite holdings: scale out ⅓ at +2R and when extended.
+
+    Returns an empty string when no satellite holding has a usable level, so the
+    section is dropped entirely.
+    """
+    show_acct = has_accounts(monitor)
+
+    def _sell_cell(shares: float, price: float | None) -> str:
+        if price is None or _isna(price):
+            return '\u2014'
+        third = shares / 3.0
+        return f'{_num(third, 3)} sh \u2248 {_money(third * float(price))}'
+
+    rows = []
+    for _, r in monitor.iterrows():
+        if is_core(r['Sleeve']):
+            continue
+        shares = r.get('Shares')
+        if _isna(shares) or float(shares) <= 0:
+            continue
+        a = lookup.get(str(r['Ticker']), {})
+        plus2r = r_multiple_price(a.get('Entry'), a.get('Stop'), 2.0)
+        ext = extended_price(r.get('EMA20'), settings)
+        if plus2r is None and ext is None:
+            continue
+        row = [str(r['Ticker'])]
+        if show_acct:
+            row.append(_text(r.get('Account')))
+        row += [
+            _num(shares, 3),
+            _money(plus2r) if plus2r is not None else '\u2014',
+            _sell_cell(float(shares), plus2r),
+            _money(ext) if ext is not None else '\u2014',
+            _sell_cell(float(shares), ext),
+        ]
+        rows.append(row)
+    if not rows:
+        return ''
+    headers = ['Ticker']
+    if show_acct:
+        headers.append('Account')
+    headers += ['Shares', '+2R price', 'Sell \u2153 @ +2R', 'Extended price', 'Sell \u2153 @ ext']
+    note = _escape_dollars(
+        '\n\n_Swing scale-out ladder: sell \u2153 of the position when price reaches **+2R** '
+        '(twice your initial risk above entry) and another \u2153 once it runs **extended** '
+        f'({_pct(settings.swing_extended_atr)} above the 20-day EMA). Trail the remainder; '
+        'sell the final \u2153 at the **Target**. Levels are estimates from current entry/stop '
+        'and the 20-EMA._'
+    )
+    return '## Scale-out ladder\n\n' + _md_table(headers, rows) + note
+
+
 def _watchlist_section(
     watch_monitor: pd.DataFrame, lookup: dict, account_value: float, settings: Settings,
     open_risk_pct: float = 0.0, cash: float | None = None,
@@ -650,6 +705,7 @@ def _build_report(
         ),
         _income_section(income),
         _holdings_section(monitor, lookup, account_value, settings, open_risk_pct, cash),
+        _scaleout_section(monitor, lookup, settings),
         _watchlist_section(watch_monitor, lookup, account_value, settings, open_risk_pct, cash),
         _recommendations_section(
             recs, rec_etfs, account_value, settings, held_values, open_risk_pct, cash

@@ -248,6 +248,22 @@ def pct_to_target(price, target) -> float | None:
     return (float(target) - float(price)) / float(price)
 
 
+def r_multiple_price(entry, stop, r) -> float | None:
+    """Price at which an open trade is up ``r`` R-multiples ((entry-stop) units)."""
+    if _isna(entry) or _isna(stop):
+        return None
+    risk = float(entry) - float(stop)
+    if risk <= 0:
+        return None
+    return float(entry) + float(r) * risk
+
+
+def extended_price(ema20, settings: Settings) -> float | None:
+    """Price at which a holding becomes 'extended' above its 20-EMA (scale-out level)."""
+    if _isna(ema20) or float(ema20) <= 0:
+        return None
+    return float(ema20) * (1 + settings.swing_extended_atr)
+
 
 def core_action(monitor_row) -> str:
     """Descriptive next-step hint for a core (long-term anchor) holding."""
