@@ -227,6 +227,36 @@ def _snapshot_section(
     return '\n'.join(lines)
 
 
+def _nearest_scaleout(monitor_row, analysis_row: dict, settings: Settings):
+    """Closest unreached scale-out level within the alert band, or ``None``.
+
+    Returns ``(label, price, sell_shares, sell_dollars, gap_pct)`` for the nearer
+    of the +2R and 'extended' levels when price sits within
+    ``settings.scaleout_alert_pct`` below it. Levels already reached are skipped
+    (those become live ``Take profit`` actions instead).
+    """
+    price = monitor_row.get('Price')
+    shares = monitor_row.get('Shares')
+    if _isna(price) or float(price) <= 0 or _isna(shares) or float(shares) <= 0:
+        return None
+    levels = [
+        ('+2R', r_multiple_price(analysis_row.get('Entry'), analysis_row.get('Stop'), 2.0)),
+        ('extended', extended_price(monitor_row.get('EMA20'), settings)),
+    ]
+    upcoming = [
+        (lbl, float(lvl)) for lbl, lvl in levels
+        if lvl is not None and not _isna(lvl) and float(lvl) > float(price)
+    ]
+    if not upcoming:
+        return None
+    lbl, level = min(upcoming, key=lambda kv: kv[1])
+    gap = (level - float(price)) / float(price)
+    if gap > settings.scaleout_alert_pct:
+        return None
+    third = float(shares) / 3.0
+    return lbl, level, third, third * level, gap
+
+
 def _action_plan_section(
     monitor: pd.DataFrame,
     watch_monitor: pd.DataFrame,
@@ -245,6 +275,7 @@ def _action_plan_section(
     buys: list[str] = []
     trims: list[str] = []
     sells: list[str] = []
+    watches: list[str] = []
 
     # Holdings -> sell / trim using the same per-row action.
     for _, r in monitor.iterrows():
@@ -257,8 +288,18 @@ def _action_plan_section(
         label = f'{ticker} ({_text(r.get("Account"))})' if show_acct and r.get('Account') else ticker
         if action.startswith(('Exit', 'Cut')):
             sells.append(f'\U0001f534 {label} \u2014 {action}')
-        elif action.startswith(('Trim', 'Take profit')):
+            continue
+        if action.startswith(('Trim', 'Take profit')):
             trims.append(f'\U0001f7e1 {label} \u2014 {action}')
+            continue
+        near = _nearest_scaleout(r, a, settings)
+        if near:
+            lvl_label, level, sell_sh, sell_amt, gap = near
+            watches.append(
+                f'\U0001f535 {label} \u2014 approaching {lvl_label} scale-out at '
+                f'{_money(level)} ({_pct(gap)} away), sell \u2153 \u2248 {_money(sell_amt)} '
+                f'({_num(sell_sh, 3)} sh)'
+            )
 
     # Recommended adds -> buys (suppressed when the market regime is risk-off).
     if risk_on and recs is not None and not recs.empty:
@@ -297,6 +338,7 @@ def _action_plan_section(
         lines.append('')
     lines.append('- **Sell/Cut**: ' + ('; '.join(sells) if sells else 'none'))
     lines.append('- **Trim/Take profit**: ' + ('; '.join(trims) if trims else 'none'))
+    lines.append('- **Watch (scale-out)**: ' + ('; '.join(watches) if watches else 'none'))
     lines.append('- **Buy**: ' + buy_text)
     return _escape_dollars('\n'.join(lines))
 

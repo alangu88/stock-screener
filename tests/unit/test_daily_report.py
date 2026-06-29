@@ -59,3 +59,34 @@ def test_auto_add_empty_recs(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert dr._auto_add_to_watchlist(pd.DataFrame(), [], set(), Settings()) == []
     assert wl.read_text(encoding='utf-8') == 'AAPL\n'
+
+
+def test_nearest_scaleout_flags_approaching_plus2r() -> None:
+    # entry 100, stop 90 -> +2R at 120; price 118 is 1.7% below, within the 3% band
+    row = {'Price': 118.0, 'Shares': 3.0, 'EMA20': 90.0}
+    analysis = {'Entry': 100.0, 'Stop': 90.0}
+    near = dr._nearest_scaleout(row, analysis, Settings())
+    assert near is not None
+    label, level, sell_sh, sell_amt, gap = near
+    assert label == '+2R'
+    assert level == pytest.approx(120.0)
+    assert sell_sh == pytest.approx(1.0)
+    assert sell_amt == pytest.approx(120.0)
+    assert gap == pytest.approx((120.0 - 118.0) / 118.0)
+
+
+def test_nearest_scaleout_none_when_outside_band() -> None:
+    # +2R at 120, price 100 is 20% away -> beyond the alert band
+    row = {'Price': 100.0, 'Shares': 3.0, 'EMA20': 80.0}
+    analysis = {'Entry': 100.0, 'Stop': 90.0}
+    assert dr._nearest_scaleout(row, analysis, Settings()) is None
+
+
+def test_nearest_scaleout_picks_closer_level() -> None:
+    # +2R at 120 (price 118, 1.7% away); extended at 90*1.1=99 already passed.
+    # EMA20 110 -> extended 121, slightly farther than +2R, so +2R is chosen.
+    row = {'Price': 118.0, 'Shares': 3.0, 'EMA20': 110.0}
+    analysis = {'Entry': 100.0, 'Stop': 90.0}
+    near = dr._nearest_scaleout(row, analysis, Settings())
+    assert near is not None
+    assert near[0] == '+2R'

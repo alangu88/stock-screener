@@ -52,10 +52,11 @@ class Settings:
     suggested_add_fraction: float = 0.5  # starter tranche as a fraction of the max add (scale-in)
     suggested_add_trigger_r: float = 1.0  # add the remainder once the trade is +this many R
 
-    # Swing-trading management for satellites (off by default; cores unaffected)
-    swing_mode: bool = False
+    # Swing-trading management for satellites (on by default; cores unaffected)
+    swing_mode: bool = True
     swing_time_stop_bars: int = 20  # cut dead money if no progress within N bars
     swing_extended_atr: float = 0.10  # > this above EMA20 -> extended, scale partial
+    scaleout_alert_pct: float = 0.03  # flag holdings within this % below a scale-out level
     earnings_blackout_days: int = 7  # flag holdings/adds within N days of earnings
     dividend_lookback_days: int = 7  # first-run window for the income-to-reconcile digest
 
@@ -91,6 +92,7 @@ class Settings:
             'min_avg_volume': self.min_avg_volume,
             'risk_per_trade': self.risk_per_trade,
             'swing_extended_atr': self.swing_extended_atr,
+            'scaleout_alert_pct': self.scaleout_alert_pct,
         }
         for name, value in non_negative.items():
             if value < 0:
@@ -166,6 +168,7 @@ def load_settings() -> Settings:
         ('swing_mode', 'SWING_MODE', _as_bool),
         ('swing_time_stop_bars', 'SWING_TIME_STOP_BARS', int),
         ('swing_extended_atr', 'SWING_EXTENDED_ATR', float),
+        ('scaleout_alert_pct', 'SCALEOUT_ALERT_PCT', float),
         ('earnings_blackout_days', 'EARNINGS_BLACKOUT_DAYS', int),
         ('dividend_lookback_days', 'DIVIDEND_LOOKBACK_DAYS', int),
     )

@@ -32,7 +32,8 @@ def test_non_positive_fields_rejected(field: str, value: object) -> None:
         dataclasses.replace(Settings(), **{field: value})
 
 
-@pytest.mark.parametrize('field', ['backoff_seconds', 'min_avg_volume', 'risk_per_trade'])
+@pytest.mark.parametrize('field', ['backoff_seconds', 'min_avg_volume', 'risk_per_trade',
+                                   'scaleout_alert_pct'])
 def test_negative_fields_rejected(field: str) -> None:
     with pytest.raises(ConfigError):
         dataclasses.replace(Settings(), **{field: -1})
