@@ -37,10 +37,16 @@ AVOID = 'Avoid'
 # weights reflect that evidence; re-run scripts/backtest_stops.py --by-setup to
 # revisit. (Breakouts are the most regime-sensitive family, so this assumes the
 # live risk-on gate stays on.)
+# Contraction is an anticipatory buy-stop, so it was historically discounted
+# (0.84) for execution uncertainty. But simulating the buy-stop fill over a
+# replay (enter when price clears the pivot within ~20 bars, else no trade)
+# shows TRIGGERED contractions realize ~0.67-0.70R (10y/5y, S&P 500) -- robustly
+# stronger than pullbacks (~0.32-0.42R) and close to breakouts (~0.72-0.93R).
+# The discount was backwards, so contraction is raised to parity with the others.
 SETUP_QUALITY = {
     PULLBACK: 0.88,
     BREAKOUT: 0.88,
-    CONTRACTION: 0.84,
+    CONTRACTION: 0.88,
     AVOID: 0.0,
 }
 
