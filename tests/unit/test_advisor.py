@@ -6,6 +6,7 @@ from src.screener.advisor import (
     SCALE_2R,
     SCALE_EXTENDED,
     SCALE_TARGET,
+    _setup_risk,
     active_scale_rank,
     add_sizing,
     analysis_lookup,
@@ -88,6 +89,22 @@ def test_add_sizing_normal():
     sizing = add_sizing(100_000, SETTINGS, {'Entry': 100.0, 'Stop': 90.0}, current_value=0.0)
     assert isinstance(sizing, PositionSizing)
     assert sizing.shares > 0
+
+
+def test_add_sizing_tilts_risk_by_setup():
+    # Wide stop so the risk budget (not the weight cap) binds, exposing the tilt.
+    breakout = add_sizing(100_000, SETTINGS, {'Entry': 100.0, 'Stop': 50.0, 'Setup': 'Breakout'}, 0.0)
+    neutral = add_sizing(100_000, SETTINGS, {'Entry': 100.0, 'Stop': 50.0}, 0.0)
+    pullback = add_sizing(100_000, SETTINGS, {'Entry': 100.0, 'Stop': 50.0, 'Setup': 'Pullback'}, 0.0)
+    assert breakout is not None and neutral is not None and pullback is not None
+    assert breakout.shares > neutral.shares > pullback.shares
+
+
+def test_setup_risk_respects_conviction_cap():
+    # A top-confidence breakout would exceed the cap once tilted; it is clamped.
+    assert _setup_risk(SETTINGS, 100.0, 'Breakout') == SETTINGS.conviction_risk_max
+    # An unknown setup falls back to plain conviction risk.
+    assert _setup_risk(SETTINGS, None, 'Reversal') == SETTINGS.risk_per_trade
 
 
 def test_add_sizing_guards():

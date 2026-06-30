@@ -72,6 +72,22 @@ def _conviction_risk(settings: Settings, confidence) -> float:
     return min(cap, base + frac * (cap - base))
 
 
+def _setup_risk(settings: Settings, confidence, setup) -> float:
+    """Conviction risk tilted by setup family, still hard-capped at the max.
+
+    Breakouts realized markedly higher expectancy than pullbacks in walk-forward
+    tests, so risk is weighted toward them (``breakout_risk_mult``) and away from
+    pullbacks (``pullback_risk_mult``); other families keep the conviction risk.
+    """
+    risk = _conviction_risk(settings, confidence)
+    label = str(setup).lower() if setup is not None else ''
+    if label.startswith('breakout'):
+        risk *= settings.breakout_risk_mult
+    elif label.startswith('pullback'):
+        risk *= settings.pullback_risk_mult
+    return min(risk, settings.conviction_risk_max)
+
+
 def add_sizing(
     account_value: float, settings: Settings, row: dict, current_value: float,
     open_risk_pct: float = 0.0, cash_available: float | None = None,
@@ -87,7 +103,7 @@ def add_sizing(
     stop = row.get('Stop')
     if account_value <= 0 or _isna(entry) or _isna(stop):
         return None
-    risk = _conviction_risk(settings, row.get('Confidence'))
+    risk = _setup_risk(settings, row.get('Confidence'), row.get('Setup'))
     headroom = settings.max_portfolio_risk - max(open_risk_pct, 0.0)
     if headroom <= 0:
         return None
