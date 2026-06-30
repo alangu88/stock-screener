@@ -13,6 +13,7 @@ Run from the repo root:
 
 from __future__ import annotations
 
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -134,8 +135,46 @@ def _escape_dollars(text: str) -> str:
     return text.replace('$', r'\$')
 
 
-def _md_table(headers: list[str], rows: list[list[str]]) -> str:
-    return _fmt_table(headers, rows)
+def _md_table(headers: list[str], rows: list[list[str]], *, align: list[str] | None = None) -> str:
+    """Render a Markdown table, right-aligning numeric columns for readability.
+
+    Alignment is auto-detected per column (a column whose every non-placeholder
+    cell looks like a number/money/percent is right-aligned) unless an explicit
+    ``align`` list of ``'left'``/``'right'`` is supplied.
+    """
+    if not rows:
+        return _fmt_table(headers, rows)
+    aligns = align or _column_alignments(headers, rows)
+    divider = ['---:' if a == 'right' else '---' for a in aligns]
+    head = '| ' + ' | '.join(headers) + ' |'
+    sep = '| ' + ' | '.join(divider) + ' |'
+    body = ['| ' + ' | '.join(row) + ' |' for row in rows]
+    return '\n'.join([head, sep, *body])
+
+
+_NUMERIC_CELL = re.compile(r'^[-+]?\$?\d[\d,]*(\.\d+)?%?$')
+_NEUTRAL_CELLS = {'', '\u2014', '-'}
+
+
+def _column_alignments(headers: list[str], rows: list[list[str]]) -> list[str]:
+    """Right-align a column when all its meaningful cells are numeric/money/percent."""
+    aligns: list[str] = []
+    for col in range(len(headers)):
+        cells = [row[col].strip() for row in rows if col < len(row)]
+        meaningful = [c for c in cells if c not in _NEUTRAL_CELLS]
+        numeric = bool(meaningful) and all(_NUMERIC_CELL.match(c) for c in meaningful)
+        aligns.append('right' if numeric else 'left')
+    return aligns
+
+
+def _status_dot(row, action: str) -> str:
+    """Traffic-light health for a holding row, present-state (trend + action)."""
+    vs200 = row.get('% vs SMA200')
+    if action.startswith(('Exit', 'Cut')) or (not _isna(vs200) and float(vs200) < 0):
+        return '\U0001f534'  # red: trend broken / exit
+    if action.startswith(('Trim', 'Take profit', 'Review')) or 'extended' in action.lower():
+        return '\U0001f7e1'  # amber: take-profit / caution
+    return '\U0001f7e2'  # green: healthy / hold / add / let-run
 
 
 # --------------------------------------------------------------------------- #
@@ -205,38 +244,43 @@ def _snapshot_section(
     account_value: float,
     settings: Settings,
 ) -> str:
-    lines: list[str] = ['## Snapshot', '']
     held_value = monitor['Value'].dropna()
     total_value = float(held_value.sum()) if not held_value.empty else 0.0
     pnl = monitor['Unreal P&L $'].dropna()
-    lines.append(f'- Account value: {_money(account_value)}')
-    lines.append(f'- Position value: {_money(total_value)}')
+    cash = account_value - total_value
+
+    metrics: list[list[str]] = [
+        ['Account value', _money(account_value)],
+        ['Position value', _money(total_value)],
+    ]
     if not pnl.empty:
-        lines.append(f'- Unrealized P&L: {_money(float(pnl.sum()))}')
+        metrics.append(['Unrealized P&L', _money(float(pnl.sum()))])
+    if account_value > 0:
+        metrics.append([
+            'Cash', f'{_money(max(cash, 0.0))} ({_pct(max(cash, 0.0) / account_value)})'
+        ])
+    count = count_individual_stocks(monitor, etfs)
+    cap = settings.max_individual_stocks
+    flag = ' \u26a0\ufe0f over cap' if count > cap else (' (near cap)' if count >= cap - 2 else '')
+    metrics.append(['Individual stocks', f'{count} / {cap}{flag}'])
 
     alloc = allocation_summary(monitor, settings.core_allocation_min, settings.core_allocation_max)
     if alloc is not None:
-        lines.append(
-            f'- Core allocation: {_pct(alloc.core_pct)} (target '
-            f'{_pct(alloc.target_min)}\u2013{_pct(alloc.target_max)}) \u2014 {alloc.label}'
-        )
-        lines.append(f'- Satellite allocation: {_pct(alloc.satellite_pct)}')
+        metrics.append([
+            'Core allocation',
+            f'{_pct(alloc.core_pct)} of {_pct(alloc.target_min)}\u2013'
+            f'{_pct(alloc.target_max)} target ({alloc.label})',
+        ])
 
     open_risk, risk_pct = portfolio_open_risk(monitor, lookup, account_value)
-    lines.append(f'- Open risk (satellite stops): {_money(open_risk)} ({_pct(risk_pct)} of account)')
-    headroom = max(settings.max_portfolio_risk - risk_pct, 0.0)
-    lines.append(
-        f'- Risk headroom: {_pct(headroom)} of {_pct(settings.max_portfolio_risk)} cap'
-        + ('  — ⚠️ at cap, adds paused' if headroom <= 0 else '')
-    )
-    cash = account_value - total_value
-    if account_value > 0:
-        lines.append(f'- Cash: {_money(max(cash, 0.0))} ({_pct(max(cash, 0.0) / account_value)})')
+    cap_pct = settings.max_portfolio_risk
+    risk_value = f'{_pct(risk_pct)} of {_pct(cap_pct)} cap ({_money(open_risk)} in stops)'
+    if risk_pct >= cap_pct:
+        risk_value += ' \u2014 \u26a0\ufe0f at cap, adds paused'
+    metrics.append(['Risk budget', risk_value])
 
-    count = count_individual_stocks(monitor, etfs)
-    cap = settings.max_individual_stocks
-    flag = ' \u26a0\ufe0f over cap' if count > cap else (' (approaching cap)' if count >= cap - 2 else '')
-    lines.append(f'- Individual stocks: {count} / {cap}{flag}')
+    lines: list[str] = ['## Snapshot', '']
+    lines.append(_md_table(['Metric', 'Value'], metrics, align=['left', 'right']))
     return '\n'.join(lines)
 
 
@@ -347,21 +391,29 @@ def _action_plan_section(
     elif buys and cash is not None and cash <= 0:
         buy_text = 'no cash available \u2014 adds require freeing capital first'
     else:
-        buy_text = '; '.join(buys) if buys else 'nothing new \u2014 sit tight'
+        buy_text = '' if buys else 'nothing new \u2014 sit tight'
+
+    def _block(title: str, items: list[str], inline: str = '') -> str:
+        if inline:
+            return f'- **{title}**: {inline}'
+        if not items:
+            return f'- **{title}**: none'
+        return f'- **{title}**\n' + '\n'.join(f'  - {it}' for it in items)
+
     lines = ['## Today\u2019s plan', '']
     if cash is not None:
         lines.append(f'_Cash available: {_money(max(cash, 0.0))}._')
         lines.append('')
-    lines.append('- **Sell/Cut**: ' + ('; '.join(sells) if sells else 'none'))
-    lines.append('- **Trim/Take profit**: ' + ('; '.join(trims) if trims else 'none'))
-    lines.append('- **Watch (scale-out)**: ' + ('; '.join(watches) if watches else 'none'))
-    lines.append('- **Buy**: ' + buy_text)
+    lines.append(_block('Sell / Cut', sells))
+    lines.append(_block('Trim / Take profit', trims))
+    lines.append(_block('Watch (scale-out)', watches))
+    lines.append(_block('Buy', buys, inline=buy_text))
     return _escape_dollars('\n'.join(lines))
 
 
 def _legend_section(settings: Settings) -> str:
     return (
-        '## How to read this report\n\n'
+        '<details>\n<summary>How to read this report</summary>\n\n'
         '- **Entry / Stop / Target / R/R** \u2014 a structural trade plan. For a name in a '
         'fresh setup these are the actual trigger levels; for every other holding they are '
         '*management* estimates \u2014 **Stop** is a trailing exit just below support, **Target** '
@@ -383,6 +435,7 @@ def _legend_section(settings: Settings) -> str:
         '- **R now** \u2014 open gain in R-multiples ((price\u2212entry)/(entry\u2212stop)); +1 means up one '
         'unit of risk. **% to stop** is the cushion before the exit triggers.\n'
         '- **Action** \u2014 the suggested next step for that row, in plain language.'
+        '\n\n</details>'
     )
 
 
@@ -391,21 +444,25 @@ def _holdings_section(
     open_risk_pct: float = 0.0, cash: float | None = None,
     harvested: dict[str, int] | None = None,
 ) -> str:
-    """One consistent table for every holding (core first, then by weight)."""
+    """Holdings split into a scannable status table + a collapsible plan table."""
     harvested = harvested or {}
     show_acct = has_accounts(monitor)
-    headers = ['Ticker']
+    pos_headers = ['Ticker']
+    plan_headers = ['Ticker']
     if show_acct:
-        headers.append('Account')
-    headers += ['Sleeve', 'Shares', 'Price', '% vs 200d', 'Value', 'Weight', 'P&L %',
-                'Entry', 'Stop', 'Target', 'R/R', 'R now', '% to stop', 'Max add (risk)',
-                'Suggested add', 'Action']
+        pos_headers.append('Account')
+        plan_headers.append('Account')
+    pos_headers += ['Sleeve', '', 'Shares', 'Price', '% vs 200d', 'Value', 'Weight', 'P&L %',
+                    'Action']
+    plan_headers += ['Entry', 'Stop', 'Target', 'R/R', 'R now', '% to stop', 'Max add (risk)',
+                     'Suggested add']
     ordered = monitor.copy()
     ordered['_core'] = ordered['Sleeve'].map(is_core)
     ordered = ordered.sort_values(
         by=['_core', 'Weight %'], ascending=[False, False], na_position='last'
     )
-    rows = []
+    pos_rows = []
+    plan_rows = []
     for _, r in ordered.iterrows():
         ticker = str(r['Ticker'])
         a = lookup.get(ticker, {})
@@ -431,17 +488,21 @@ def _holdings_section(
             sugg_txt = _num(sugg[0], 3) if sugg else '\u2014'
         r_now = open_r_multiple(r.get('Price'), a.get('Entry'), a.get('Stop'))
         to_stop = pct_to_stop(r.get('Price'), a.get('Stop'))
-        row = [ticker]
+        lead = [ticker]
         if show_acct:
-            row.append(_text(r.get('Account')))
-        row += [
+            lead.append(_text(r.get('Account')))
+        pos_rows.append(lead + [
             'Core' if core else 'Satellite',
+            _status_dot(r, action),
             _num(r.get('Shares'), 3),
             _money(r.get('Price')),
             _pct(r.get('% vs SMA200')),
             _money(r.get('Value')),
             _pct(r.get('Weight %')),
             _pct(r.get('Unreal P&L %')),
+            action,
+        ])
+        plan_rows.append(lead + [
             _money(a.get('Entry')),
             _money(a.get('Stop')),
             _money(a.get('Target')),
@@ -450,10 +511,14 @@ def _holdings_section(
             _pct(to_stop),
             add_txt,
             sugg_txt,
-            action,
-        ]
-        rows.append(row)
-    return '## Holdings\n\n' + _md_table(headers, rows)
+        ])
+    return (
+        '## Holdings\n\n'
+        + _md_table(pos_headers, pos_rows)
+        + '\n\n<details>\n<summary>Trade plan &amp; sizing</summary>\n\n'
+        + _md_table(plan_headers, plan_rows)
+        + '\n\n</details>'
+    )
 
 
 def _scaleout_section(
@@ -563,9 +628,9 @@ def _stops_section(
     monitor: pd.DataFrame, lookup: dict, settings: Settings,
     history: dict[str, pd.DataFrame] | None = None,
 ) -> str:
-    """Fidelity-ready stop-alert levels for satellite holdings, nearest first.
+    """Stop-alert levels for satellite holdings, nearest first.
 
-    Most fractional lots cannot carry a resting stop order at Fidelity, so this
+    Most fractional lots cannot carry a resting stop order, so this
     lists the price to set a **price alert** at plus the next stop action. The
     alert starts at the structural stop, steps up to your cost (breakeven) once a
     position is up more than its stop distance, then **trails** up under a
@@ -625,7 +690,7 @@ def _stops_section(
         headers.append('Account')
     headers += ['Shares', 'Price', 'Alert at', '% to alert', '$ at risk', 'Next step']
     note = _escape_dollars(
-        '\n\n_Set a Fidelity **price alert** at each **Alert at** level (fractional shares '
+        '\n\n_Set a **price alert** at each **Alert at** level (fractional shares '
         'can\u2019t hold resting stop orders); when it fires, sell the position manually. The '
         'alert starts at the structural stop, steps up to your **cost (breakeven)** once a '
         'name is up more than its stop distance, then **trails** under a Chandelier stop '
@@ -894,10 +959,10 @@ def _build_report(
     # held in two accounts) so cash matches account_value - holdings exactly.
     total_held = float(monitor['Value'].dropna().sum())
     cash = max(account_value - total_held, 0.0)
+    regime_dot = '\U0001f7e2' if risk_on else '\U0001f534'
     sections = [
-        f'# Daily Position Report\n\n_Generated {generated_at}. Market context: {context}. '
-        f'Regime: {"Risk-On" if risk_on else "Risk-Off"}._',
-        _legend_section(settings),
+        f'# Daily Position Report\n\n{regime_dot} **{"Risk-On" if risk_on else "Risk-Off"}** '
+        f'\u00b7 _Generated {generated_at} \u00b7 Market context: {context}_',
         _snapshot_section(monitor, lookup, etfs, account_value, settings),
         _action_plan_section(
             monitor, watch_monitor, lookup, recs, account_value, settings, risk_on, open_risk_pct,
@@ -917,7 +982,8 @@ def _build_report(
     exposure_section = _exposure_section(exposures, tail_value, account_value)
     if exposure_section:
         sections.append(exposure_section)
-    return '\n\n'.join(s for s in sections if s) + '\n'
+    sections.append(_legend_section(settings))
+    return '\n\n---\n\n'.join(s for s in sections if s) + '\n'
 
 
 def _income_section(income: list[IncomeEvent] | None) -> str:
