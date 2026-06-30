@@ -31,7 +31,6 @@ VTI, core
 VXUS, core
 FSELX, satellite
 MSFT, satellite
-NOW, satellite
 NVDA, satellite
 COHR, satellite
 PLTR, satellite

@@ -98,6 +98,11 @@ def test_parse_positions_lots_stay_separate_across_accounts():
     ]
 
 
+def test_parse_positions_drops_fully_closed_position():
+    entries = parse_positions('[Roth IRA]\nNOW, 97.12, 2\nMSFT, 370, 1\nNOW, -, -2')
+    assert [(e.account, e.ticker) for e in entries] == [('Roth IRA', 'MSFT')]
+
+
 
 def test_parse_positions_entries_before_header_have_no_account():
     entries = parse_positions('AAPL\n[Taxable]\nMSFT')

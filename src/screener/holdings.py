@@ -173,6 +173,8 @@ def _aggregate_lots(
     entries: list[PositionEntry] = []
     for account, symbol in order:
         price, shares = _combine_lots(grouped[(account, symbol)])
+        if shares is not None and abs(shares) < 1e-9:
+            continue  # fully closed: buys and sells net to zero, so it is no longer held
         entries.append(PositionEntry(symbol, price, shares, account))
     return entries
 
