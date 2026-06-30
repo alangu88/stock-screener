@@ -39,6 +39,21 @@ from src.screener.strategy import StrategyConfig  # noqa: E402
 BENCHMARK = 'SPY'
 
 
+def _exit_variant(name: str) -> StopParams:
+    """Named exit systems so the compounding sim can compare exits, not just gates."""
+    variants = {
+        'structural': StopParams(name='Structural', target_exit=True),
+        'chandelier': StopParams(name='Chandelier 3.0x', chandelier_atr_mult=3.0,
+                                 target_exit=False),
+        'be-chandelier': StopParams(name='BE@1R + Chandelier 3.0x', chandelier_atr_mult=3.0,
+                                    breakeven_r=1.0, target_exit=False),
+        'be-partial': StopParams(name='BE@1R + 1/3@2R + Chand 3.0x', chandelier_atr_mult=3.0,
+                                 breakeven_r=1.0, partial_r=2.0, partial_frac=1 / 3,
+                                 target_exit=False),
+    }
+    return variants[name]
+
+
 def _drawdown(curve: list[float]) -> float:
     peak, mdd = curve[0], 0.0
     for v in curve:
@@ -122,6 +137,10 @@ def main() -> int:
     p.add_argument('--regime', action='store_true', help='Only enter when SPY is above its 200-day.')
     p.add_argument('--min-rr', type=float, default=None)
     p.add_argument('--min-confidence', type=float, default=None)
+    p.add_argument(
+        '--exit', choices=['structural', 'chandelier', 'be-chandelier', 'be-partial'],
+        default='be-partial', help='Exit system to compound (structural = live behavior).',
+    )
     args = p.parse_args()
 
     settings = load_settings()
@@ -149,8 +168,7 @@ def main() -> int:
         print('No entries generated.')
         return 0
 
-    variant = StopParams(name='BE@1R + 1/3@2R + Chand 3.0x', chandelier_atr_mult=3.0,
-                         breakeven_r=1.0, partial_r=2.0, partial_frac=1 / 3, target_exit=False)
+    variant = _exit_variant(args.exit)
     trades = _resolve_trades(entries, histories, strategy, variant)
     equity, curve = _equity_curve(trades, settings, args.max_concurrent, args.cost_bps / 10_000.0)
 
@@ -159,7 +177,8 @@ def main() -> int:
     monthly = pd.Series(curve).pct_change().dropna()
     sharpe = (monthly.mean() / monthly.std() * math.sqrt(252 / args.step)) if monthly.std() else 0.0
 
-    print(f'\nTrades: {len(trades)} | window: {years:.1f}y | cost: {args.cost_bps:.0f} bps round-trip')
+    print(f'\nTrades: {len(trades)} | window: {years:.1f}y | cost: {args.cost_bps:.0f} bps round-trip'
+          f' | exit: {variant.name}')
     print(f'{"Strategy":<14}{"TotRet":>9}{"CAGR":>8}{"MaxDD":>8}{"Sharpe":>8}')
     print('-' * 47)
     print(f'{"Portfolio":<14}{equity-1:>8.1%}{_cagr(1,equity,years):>8.1%}'
