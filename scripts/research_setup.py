@@ -1,12 +1,13 @@
-"""Research-only: which features separate strong breakouts from weak ones.
+"""Research-only: which features separate strong setups from weak ones.
 
-Replays the production pipeline bar-by-bar (no look-ahead), keeps only confirmed
-Breakout entries that clear the live gates, records each entry's feature
+Replays the production pipeline bar-by-bar (no look-ahead), keeps only entries of
+the chosen setup family that clear the live gates, records each entry's feature
 snapshot together with its realized Structural-stop R-multiple, then buckets by
-candidate predictors so a breakout-specific filter can be justified by evidence
+candidate predictors so a setup-specific filter can be justified by evidence
 before touching the live screen.
 
-    python scripts/research_breakout.py --max-tickers 250 --period 10y --workers 4
+    python scripts/research_setup.py --setup breakout --max-tickers 250 --period 10y
+    python scripts/research_setup.py --setup pullback --max-tickers 250 --period 10y
 """
 
 from __future__ import annotations
@@ -31,16 +32,17 @@ from src.data.cache import SQLiteCache  # noqa: E402
 from src.data.universe import load_sp500_universe  # noqa: E402
 from src.data.yahoo_client import YahooFinanceClient  # noqa: E402
 from src.screener.ranking import confidence_score  # noqa: E402
-from src.screener.setups import BREAKOUT, detect_setup  # noqa: E402
+from src.screener.setups import BREAKOUT, CONTRACTION, PULLBACK, detect_setup  # noqa: E402
 from src.screener.strategy import StrategyConfig  # noqa: E402
 from src.screener.trade_plan import build_trade_plan  # noqa: E402
 
 BENCHMARK = 'SPY'
 STRUCTURAL = StopParams(name='Structural', target_exit=True)
+SETUPS = {'breakout': BREAKOUT, 'pullback': PULLBACK, 'contraction': CONTRACTION}
 
-# (label, extractor) for each candidate breakout-quality predictor.
+# (label, extractor) for each candidate setup-quality predictor.
 PREDICTORS: list[tuple[str, callable]] = [
-    ('rel_volume (surge)', lambda f: f.rel_volume),
+    ('rel_volume', lambda f: f.rel_volume),
     ('base_depth', lambda f: f.base_depth),
     ('atr_pct', lambda f: f.atr_pct),
     ('rs_outperformance', lambda f: f.rs_outperformance),
@@ -49,16 +51,18 @@ PREDICTORS: list[tuple[str, callable]] = [
     ('contraction_ratio', lambda f: f.contraction_ratio),
     ('pct_from_high', lambda f: f.pct_from_high),
     ('trend_score', lambda f: f.trend_score),
-    ('ext_into_breakout', lambda f: (f.price - f.pivot) / f.pivot if f.pivot else 0.0),
+    ('depth_below_pivot', lambda f: (f.pivot - f.price) / f.pivot if f.pivot else 0.0),
+    ('gap_to_ema', lambda f: (f.price - f.ema_trend) / f.ema_trend if f.ema_trend else 0.0),
+    ('gap_to_mafast', lambda f: (f.price - f.ma_fast) / f.ma_fast if f.ma_fast else 0.0),
 ]
 
 _WORKER_CTX: dict = {}
 
 
-def _worker_init(benchmark_close, strategy, min_conf, min_rr, min_vol) -> None:
+def _worker_init(benchmark_close, strategy, min_conf, min_rr, min_vol, target) -> None:
     _WORKER_CTX.update(
         benchmark_close=benchmark_close, strategy=strategy,
-        min_conf=min_conf, min_rr=min_rr, min_vol=min_vol,
+        min_conf=min_conf, min_rr=min_rr, min_vol=min_vol, target=target,
     )
 
 
@@ -93,7 +97,7 @@ def _records_for(item):
         if features is None or features.avg_volume < _WORKER_CTX['min_vol']:
             continue
         setup = detect_setup(features, strategy)
-        if setup.setup_type != BREAKOUT:
+        if setup.setup_type != _WORKER_CTX['target']:
             continue
         plan = build_trade_plan(features, setup, strategy)
         if not plan.immediate_entry or plan.entry is None or plan.stop is None:
@@ -143,14 +147,15 @@ def _bucket_report(records: list[dict], label: str, nbuckets: int = 4) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='Mine breakout-quality predictors.')
+    parser = argparse.ArgumentParser(description='Mine setup-quality predictors.')
+    parser.add_argument('--setup', choices=sorted(SETUPS), default='breakout')
     parser.add_argument('--max-tickers', type=int, default=250)
     parser.add_argument('--period', default='10y')
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--buckets', type=int, default=4)
     parser.add_argument(
         '--min-relvol', type=float, default=None,
-        help='Only analyze breakouts with rel_volume >= this (conditional/independence test).',
+        help='Only analyze entries with rel_volume >= this (conditional/independence test).',
     )
     args = parser.parse_args()
 
@@ -172,8 +177,9 @@ def main() -> int:
 
     items = [(t, histories.get(t)) for t in tickers]
     records: list[dict] = []
+    target = SETUPS[args.setup]
     init = (benchmark_close, strategy, settings.rec_min_confidence,
-            settings.rec_min_reward_risk, settings.min_avg_volume)
+            settings.rec_min_reward_risk, settings.min_avg_volume, target)
     if args.workers > 1:
         with ProcessPoolExecutor(
             max_workers=args.workers, initializer=_worker_init, initargs=init,
@@ -186,21 +192,21 @@ def main() -> int:
             records.extend(_records_for(item))
 
     if not records:
-        print('No breakout entries captured.')
+        print(f'No {target} entries captured.')
         return 0
 
     if args.min_relvol is not None:
-        records = [r for r in records if r['rel_volume (surge)'] >= args.min_relvol]
+        records = [r for r in records if r['rel_volume'] >= args.min_relvol]
         print(f'\n[conditional] rel_volume >= {args.min_relvol:g}')
         if not records:
-            print('No breakout entries in this subset.')
+            print(f'No {target} entries in this subset.')
             return 0
 
     rs = [r['r'] for r in records]
     mean = sum(rs) / len(rs)
     win = sum(1 for x in rs if x > 0) / len(rs) * 100
     print(
-        f'\nBreakout entries: {len(records)} | baseline ExpR {mean:.3f} | win {win:.1f}%'
+        f'\n{target} entries: {len(records)} | baseline ExpR {mean:.3f} | win {win:.1f}%'
     )
     for label, _ in PREDICTORS:
         _bucket_report(records, label, args.buckets)
