@@ -19,9 +19,9 @@ and organizes survivors into a Core / Satellite portfolio.
 > Generated on demand via the **Daily Screen** workflow or `python scripts/generate_snapshot.py`. Mechanical, research-only.
 
 <!-- SCREENER:START -->
-![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-21-blue) ![Adds](https://img.shields.io/badge/adds-14-success)
+![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-22-blue) ![Adds](https://img.shields.io/badge/adds-9-success)
 
-_Last updated: 2026-06-29 13:33 UTC_
+_Last updated: 2026-06-30 13:52 UTC_
 
 > **Parameters:** Risk/trade 1% · Core band 60%–70% · Add gates conf ≥ 70 & R/R ≥ 2.5 · Max 10 single-stock names · Max position 10%
 
@@ -29,46 +29,42 @@ _Last updated: 2026-06-29 13:33 UTC_
 
 | Ticker | Setup | Confidence | R/R | Entry | Stop | Target | Rank Score | Actionable |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TSM | Pullback | 81 | 2.38 | 442.39 | 389.30 | 568.52 | 81.10 | Yes |
-| COHR | Pullback | 78 | 4.16 | 369.00 | 326.80 | 544.52 | 78.00 | Yes |
-| FSELX | Pullback | 72 | 3.85 | 66.58 | 61.01 | 88.06 | 72.10 | No |
-| VTI | Pullback | 62 | 2.73 | 365.27 | 355.08 | 393.12 | 62.00 | Yes |
-| VXUS | Pullback | 60 | 3.96 | 84.53 | 81.88 | 95.02 | 59.60 | Yes |
-| AVGO | Avoid | 0 | 8.78 | 374.05 | 359.11 | 505.23 | 0.00 | No |
-| AMZN | Avoid | 0 | 7.32 | 237.59 | 230.86 | 286.79 | 0.00 | No |
-| AMD | Avoid | 0 | 4.44 | 532.80 | 494.60 | 702.43 | 0.00 | No |
-| AAPL | Avoid | 0 | 3.31 | 284.96 | 271.77 | 328.61 | 0.00 | No |
-| META | Avoid | 0 | 3.54 | 564.63 | 535.55 | 667.45 | 0.00 | No |
-| GOOGL | Avoid | 0 | 4.00 | 346.85 | 327.24 | 425.25 | 0.00 | No |
-| LLY | Avoid | 0 | 1.75 | 1,233.64 | 1,085.60 | 1,492.77 | 0.00 | No |
-| LRCX | Avoid | 0 | 4.41 | 388.64 | 355.53 | 534.68 | 0.00 | No |
-| NFLX | Avoid | 0 | 4.85 | 74.51 | 70.26 | 95.13 | 0.00 | No |
-| MU | Avoid | 0 | 4.58 | 1,099.95 | 968.40 | 1,702.74 | 0.00 | No |
-| MSFT | Avoid | 0 | 3.88 | 376.22 | 346.01 | 493.34 | 0.00 | No |
-| NOW | Avoid | 0 | 14.62 | 101.73 | 98.32 | 151.54 | 0.00 | No |
-| SNDK | Avoid | 0 | 5.97 | 1,995.50 | 1,815.05 | 3,072.56 | 0.00 | No |
-| PLTR | Avoid | 0 | 4.82 | 116.67 | 104.77 | 174.00 | 0.00 | No |
-| NVDA | Avoid | 0 | 8.22 | 194.47 | 189.48 | 235.53 | 0.00 | No |
-| XOM | Avoid | 0 | 11.26 | 136.99 | 134.44 | 165.72 | 0.00 | No |
+| COHR | Pullback | 79 | 3.07 | 398.00 | 350.24 | 544.52 | 78.80 | Yes |
+| FSELX | Pullback | 72 | 2.36 | 69.05 | 61.00 | 88.06 | 72.10 | No |
+| VTI | Pullback | 63 | 1.91 | 368.20 | 355.12 | 393.12 | 62.90 | Yes |
+| VXUS | Pullback | 62 | 3.01 | 85.16 | 81.88 | 95.02 | 62.20 | Yes |
+| AMD | Avoid | 0 | 2.68 | 550.82 | 486.98 | 722.22 | 0.00 | No |
+| AAPL | Avoid | 0 | 3.31 | 284.94 | 271.77 | 328.59 | 0.00 | No |
+| DELL | Avoid | 0 | 4.85 | 421.38 | 371.44 | 663.58 | 0.00 | No |
+| AVGO | Avoid | 0 | 7.04 | 375.93 | 356.81 | 510.47 | 0.00 | No |
+| AMZN | Avoid | 0 | 5.62 | 239.57 | 230.81 | 288.77 | 0.00 | No |
+| GOOGL | Avoid | 0 | 3.28 | 351.16 | 327.28 | 429.57 | 0.00 | No |
+| META | Avoid | 0 | 5.16 | 555.63 | 535.69 | 658.45 | 0.00 | No |
+| MSFT | Avoid | 0 | 4.59 | 371.43 | 345.92 | 488.55 | 0.00 | No |
+| LLY | Avoid | 0 | 1.81 | 1,213.19 | 1,070.06 | 1,472.32 | 0.00 | No |
+| LRCX | Avoid | 0 | 3.31 | 432.93 | 380.98 | 604.73 | 0.00 | No |
+| NFLX | Avoid | 0 | 6.55 | 73.42 | 70.28 | 94.04 | 0.00 | No |
+| MU | Avoid | 0 | 4.38 | 1,147.95 | 1,010.20 | 1,750.74 | 0.00 | No |
+| NOW | Avoid | 0 | 4.84 | 98.17 | 87.88 | 147.97 | 0.00 | No |
+| NVDA | Avoid | 0 | 5.07 | 197.46 | 189.08 | 239.94 | 0.00 | No |
+| SNDK | Avoid | 0 | 4.19 | 2,143.05 | 1,885.88 | 3,220.11 | 0.00 | No |
+| PLTR | Avoid | 0 | 5.28 | 115.68 | 104.82 | 173.01 | 0.00 | No |
+| TSM | Avoid | 0 | 1.87 | 463.64 | 414.57 | 555.38 | 0.00 | No |
+| XOM | Avoid | 0 | 23.76 | 135.77 | 134.57 | 164.50 | 0.00 | No |
 
 #### Recommended adds (clear the gates)
 
 | Ticker | Setup | Sleeve | Entry | Stop | Target | R/R | Confidence | Rank Score | Position Size % |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MRVL | Pullback | Core | 271.11 | 238.58 | 496.91 | 6.94 | 85 | 85.00 | 4.05% |
-| FLEX | Pullback | Core | 148.38 | 130.57 | 212.42 | 3.60 | 83 | 83.20 | 3.96% |
-| DELL | Pullback | Core | 390.36 | 343.52 | 711.67 | 6.86 | 79 | 78.60 | 3.74% |
-| COHR | Pullback | Core | 369.55 | 326.80 | 544.52 | 4.09 | 78 | 78.00 | 3.85% |
-| ELV | Pullback | Core | 393.40 | 378.73 | 472.72 | 5.41 | 77 | 77.10 | 10.00% |
-| EXPD | Pullback | Core | 161.53 | 152.91 | 183.28 | 2.52 | 77 | 76.60 | 8.20% |
-| EBAY | Pullback | Core | 109.31 | 104.12 | 133.74 | 4.71 | 76 | 76.00 | 9.15% |
-| NUE | Pullback | Core | 240.10 | 217.60 | 322.31 | 3.65 | 76 | 76.00 | 4.63% |
-| INTC | Pullback | Core | 126.63 | 111.43 | 184.57 | 3.81 | 76 | 75.60 | 3.60% |
-| STLD | Pullback | Core | 246.84 | 217.22 | 358.45 | 3.77 | 74 | 73.50 | 3.50% |
-| ODFL | Pullback | Core | 218.99 | 193.38 | 308.62 | 3.50 | 73 | 73.00 | 3.57% |
-| JBL | Pullback | Core | 358.52 | 317.40 | 535.94 | 4.32 | 72 | 72.10 | 3.59% |
-| ADM | Pullback | Core | 77.71 | 71.07 | 99.12 | 3.23 | 72 | 71.80 | 4.80% |
-| CDNS | Pullback | Core | 381.33 | 335.57 | 501.82 | 2.63 | 71 | 70.60 | 3.36% |
+| STX | Pullback | Core | 971.91 | 855.29 | 1,594.86 | 5.34 | 86 | 86.10 | 7.42% |
+| COHR | Pullback | Core | 398.00 | 350.24 | 544.52 | 3.07 | 79 | 78.80 | 6.79% |
+| EXPD | Pullback | Core | 161.38 | 153.29 | 182.92 | 2.66 | 77 | 76.60 | 10.00% |
+| ELV | Pullback | Core | 385.83 | 378.73 | 472.72 | 12.24 | 76 | 76.50 | 10.00% |
+| EBAY | Pullback | Core | 110.28 | 104.11 | 133.74 | 3.80 | 76 | 75.70 | 10.00% |
+| RL | Pullback | Core | 397.52 | 349.82 | 525.97 | 2.69 | 75 | 75.30 | 6.49% |
+| SW | Pullback | Core | 45.59 | 40.12 | 60.19 | 2.67 | 74 | 73.60 | 6.35% |
+| IBKR | Pullback | Core | 88.18 | 78.34 | 116.56 | 2.89 | 72 | 72.50 | 6.73% |
+| JBL | Pullback | Core | 378.50 | 333.08 | 535.94 | 3.47 | 72 | 72.10 | 6.22% |
 
 > Mechanical signals for research only — not trade recommendations.
 <!-- SCREENER:END -->
