@@ -59,10 +59,12 @@ PREDICTORS: list[tuple[str, callable]] = [
 _WORKER_CTX: dict = {}
 
 
-def _worker_init(benchmark_close, strategy, min_conf, min_rr, min_vol, target) -> None:
+def _worker_init(benchmark_close, strategy, min_conf, min_rr, min_vol, target,
+                 trigger_window) -> None:
     _WORKER_CTX.update(
         benchmark_close=benchmark_close, strategy=strategy,
         min_conf=min_conf, min_rr=min_rr, min_vol=min_vol, target=target,
+        trigger_window=trigger_window,
     )
 
 
@@ -85,6 +87,8 @@ def _records_for(item):
     high_full = df['High'] if 'High' in df.columns else df['Close']
     low_full = df['Low'] if 'Low' in df.columns else df['Close']
     atr_series = atr(high_full, low_full, df['Close'], strategy.atr_period).shift(1)
+    high_seq = high_full.reindex(index).to_numpy()
+    trigger_window = _WORKER_CTX['trigger_window']
 
     out = []
     cooldown_until = -1
@@ -100,14 +104,28 @@ def _records_for(item):
         if setup.setup_type != _WORKER_CTX['target']:
             continue
         plan = build_trade_plan(features, setup, strategy)
-        if not plan.immediate_entry or plan.entry is None or plan.stop is None:
+        if plan.entry is None or plan.stop is None:
             continue
         if plan.reward_risk is None or plan.reward_risk < _WORKER_CTX['min_rr']:
             continue
         conf = confidence_score(features, setup, plan, strategy)
         if conf < _WORKER_CTX['min_conf']:
             continue
-        date = index[pos]
+        if plan.immediate_entry:
+            entry_pos = pos
+        else:
+            # Anticipatory buy-stop: wait up to trigger_window bars for price to
+            # clear the pivot. Fill at the stop level; expire if never triggered.
+            entry_pos = None
+            stop_scan = min(pos + 1 + trigger_window, len(index))
+            for j in range(pos + 1, stop_scan):
+                if high_seq[j] >= plan.entry:
+                    entry_pos = j
+                    break
+            if entry_pos is None:
+                cooldown_until = pos + 5
+                continue
+        date = index[entry_pos]
         high, low, fwd_close, atr_prev = _forward_arrays(
             df, date, strategy.atr_period, atr_series
         )
@@ -122,7 +140,7 @@ def _records_for(item):
         rec = {label: extract(features) for label, extract in PREDICTORS}
         rec['r'] = float(res.r_multiple)
         out.append(rec)
-        cooldown_until = pos + 5
+        cooldown_until = entry_pos + 5
     return out
 
 
@@ -157,6 +175,10 @@ def main() -> int:
         '--min-relvol', type=float, default=None,
         help='Only analyze entries with rel_volume >= this (conditional/independence test).',
     )
+    parser.add_argument(
+        '--trigger-window', type=int, default=20,
+        help='Bars to wait for an anticipatory buy-stop (contraction) to trigger.',
+    )
     args = parser.parse_args()
 
     settings = load_settings()
@@ -179,7 +201,8 @@ def main() -> int:
     records: list[dict] = []
     target = SETUPS[args.setup]
     init = (benchmark_close, strategy, settings.rec_min_confidence,
-            settings.rec_min_reward_risk, settings.min_avg_volume, target)
+            settings.rec_min_reward_risk, settings.min_avg_volume, target,
+            args.trigger_window)
     if args.workers > 1:
         with ProcessPoolExecutor(
             max_workers=args.workers, initializer=_worker_init, initargs=init,
