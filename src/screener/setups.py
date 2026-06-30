@@ -59,6 +59,13 @@ PULLBACK_BELOW_EMA_PENALTY = 0.7
 BREAKOUT_STRONG_VOLUME_MULT = 1.7
 BREAKOUT_WEAK_VOLUME_PENALTY = 0.85
 
+# Independently of volume, breakouts clearing into 52-week-high territory (no
+# overhead supply) realized ~1.0R versus ~0.63R for those breaking a lower pivot
+# while still >~1% below the prior high (10y S&P 500, strong-volume subset).
+# Demote breakouts that remain well below the 52-week high (overhead resistance).
+BREAKOUT_NEAR_HIGH_PCT = -0.01
+BREAKOUT_OVERHEAD_PENALTY = 0.90
+
 
 def setup_quality(features: MarketFeatures, setup: Setup) -> float:
     """Setup-family quality, context-adjusted for realized-edge modifiers."""
@@ -69,8 +76,11 @@ def setup_quality(features: MarketFeatures, setup: Setup) -> float:
         and features.price < features.ema_trend
     ):
         base *= PULLBACK_BELOW_EMA_PENALTY
-    if setup.setup_type == BREAKOUT and features.rel_volume < BREAKOUT_STRONG_VOLUME_MULT:
-        base *= BREAKOUT_WEAK_VOLUME_PENALTY
+    if setup.setup_type == BREAKOUT:
+        if features.rel_volume < BREAKOUT_STRONG_VOLUME_MULT:
+            base *= BREAKOUT_WEAK_VOLUME_PENALTY
+        if features.pct_from_high < BREAKOUT_NEAR_HIGH_PCT:
+            base *= BREAKOUT_OVERHEAD_PENALTY
     return base
 
 
