@@ -132,12 +132,25 @@ class YahooFinanceClient:
         only the most recent ``tail_period`` bars are pulled and spliced on top.
         That keeps same-day reruns cheap and captures a fresh latest price at run
         time without the rate-limit failures a full long-window refresh of the
-        whole universe tends to trigger. A failed tail download keeps the cached
-        copy rather than blanking the name.
+        whole universe tends to trigger. Names that a throttled batch drops are
+        retried individually so their price still refreshes; a download that still
+        fails keeps the cached copy rather than blanking the name.
         """
         sorted_tickers = sorted(set(tickers))
         result = self.fetch_history(sorted_tickers, period=period, interval=interval)
         tail = self._download_batch(sorted_tickers, period=tail_period, interval=interval)
+        # yfinance silently drops a random subset of names from a large batch when
+        # throttled, which would leave those prices stale. Retry the misses one at
+        # a time -- single-ticker downloads are far more reliable -- so every name
+        # still lands a fresh bar.
+        for ticker in sorted_tickers:
+            recent = tail.get(ticker)
+            if recent is not None and not recent.empty:
+                continue
+            retry = self._download_batch([ticker], period=tail_period, interval=interval)
+            got = retry.get(ticker)
+            if got is not None and not got.empty:
+                tail[ticker] = got
         ttl_seconds = self.settings.cache_ttl_hours * 3600
         for ticker in sorted_tickers:
             recent = tail.get(ticker)

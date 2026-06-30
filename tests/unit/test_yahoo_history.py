@@ -130,6 +130,30 @@ def test_fetch_history_live_keeps_cache_when_tail_fails(tmp_path):
     assert float(out['AAA']['Close'].iloc[-1]) == 11.0  # cached close kept, not blanked
 
 
+def test_fetch_history_live_retries_dropped_ticker_individually(tmp_path):
+    """A name the batch tail drops gets retried solo so its price still refreshes."""
+    calls: list[tuple[str, list[str]]] = []
+    base = _dated([10.0, 11.0], ['2026-06-26', '2026-06-29'])
+    tail = _dated([11.0, 12.5], ['2026-06-29', '2026-06-30'])
+    client = YahooFinanceClient(Settings(), SQLiteCache(tmp_path))
+
+    def fake_batch(tickers, period='2y', interval='1d'):
+        calls.append((period, sorted(tickers)))
+        if period == '2y':
+            return {t: base.copy() for t in tickers}
+        # The multi-ticker tail batch drops BBB; the solo retry returns it.
+        if len(tickers) > 1:
+            return {'AAA': tail.copy()}
+        return {t: tail.copy() for t in tickers}
+
+    client._download_batch = fake_batch  # type: ignore[assignment]
+
+    out = client.fetch_history_live(['AAA', 'BBB'], period='2y', tail_period='5d')
+    assert float(out['AAA']['Close'].iloc[-1]) == 12.5  # from the batch tail
+    assert float(out['BBB']['Close'].iloc[-1]) == 12.5  # recovered via solo retry
+    assert ('5d', ['BBB']) in calls  # the dropped name was retried alone
+
+
 def test_fundamentals_cached_with_separate_long_ttl(monkeypatch):
     """Fundamentals must persist on their own (longer) TTL, not the price TTL."""
     captured: dict[str, int] = {}
