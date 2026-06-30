@@ -133,6 +133,21 @@ def test_scaleout_section_marks_harvested_level_taken() -> None:
     assert 'to +2R' in aaa_line  # nearest now points at the un-harvested +2R
 
 
+def test_scaleout_section_flags_folded_extended_when_2r_taken() -> None:
+    # Case B: extended ($115) sits *above* +2R ($105); +2R already harvested (rank 2).
+    # The extended rung is suppressed/folded, not a separate ⅓ still owed.
+    monitor = pd.DataFrame([
+        {'Ticker': 'AAA', 'Sleeve': 'Satellite', 'Account': 'Taxable',
+         'Shares': 3.0, 'Price': 100.0, 'EMA20': 104.5},  # extended = 104.5 * 1.10 = 114.95
+    ])
+    lookup = {'AAA': {'Entry': 95.0, 'Stop': 90.0}}  # +2R = 95 + 2*5 = 105
+    harvested = {dr.scaleout_key('Taxable', 'AAA'): dr.SCALE_2R}
+    out = dr._scaleout_section(monitor, lookup, Settings(), harvested)
+    aaa_line = next(ln for ln in out.splitlines() if ln.startswith('| AAA'))
+    assert 'folded \u2014 +2R taken' in aaa_line  # extended rung flagged as suppressed
+    assert '\u2713 taken' in aaa_line  # +2R cell still reads taken
+
+
 def test_sold_keys_detects_negative_lots() -> None:
     text = (
         '[Taxable]\n'

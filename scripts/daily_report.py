@@ -473,10 +473,12 @@ def _scaleout_section(
         return (float(level) - price) / price
 
     def _level_cell(
-        price: float, shares: float, level: float | None, taken: bool
+        price: float, shares: float, level: float | None, taken: bool, folded: bool = False
     ) -> tuple[str, str]:
         if level is None or _isna(level):
             return '\u2014', '\u2014'
+        if folded:  # leapfrogged by a higher-priority milestone -> won't fire separately
+            return _money(level), 'folded \u2014 +2R taken'
         if taken:  # already harvested -> show price for reference, no prompt
             return _money(level), '\u2713 taken'
         third = shares / 3.0
@@ -516,11 +518,18 @@ def _scaleout_section(
         rank = harvested.get(scaleout_key(r.get('Account'), str(r['Ticker'])), 0)
         p2_taken = rank >= SCALE_2R
         ex_taken = rank >= SCALE_EXTENDED
+        # Case B: +2R harvested but the extended rung sits *above* it -> the lower-
+        # ranked extended scale is suppressed (folded into the +2R trim), so flag it
+        # rather than implying a separate ⅓ is still owed.
+        ex_folded = (
+            rank >= SCALE_2R and ext is not None and plus2r is not None
+            and float(ext) > float(plus2r)
+        )
         sort_gap, nearest_txt = _nearest_label(
             _gap(price, plus2r), _gap(price, ext), p2_taken, ex_taken
         )
         p2_price, p2_sell = _level_cell(price, shares, plus2r, p2_taken)
-        ex_price, ex_sell = _level_cell(price, shares, ext, ex_taken)
+        ex_price, ex_sell = _level_cell(price, shares, ext, ex_taken, folded=ex_folded)
         row = [str(r['Ticker'])]
         if show_acct:
             row.append(_text(r.get('Account')))
@@ -540,8 +549,9 @@ def _scaleout_section(
         'reached, act now). Sell \u2153 of the position when price reaches **+2R** (twice your '
         'initial risk above entry) and another \u2153 once it runs **extended** '
         f'({_pct(settings.swing_extended_atr)} above the 20-day EMA). Trail the remainder; '
-        'sell the final \u2153 at the **Target**. Levels are estimates from current entry/stop '
-        'and the 20-EMA._'
+        'sell the final \u2153 at the **Target**. \u201cfolded \u2014 +2R taken\u201d marks an '
+        'extended rung skipped because +2R (a higher-priority milestone) was already harvested '
+        'at a lower price. Levels are estimates from current entry/stop and the 20-EMA._'
     )
     return '## Scale-out ladder\n\n' + _md_table(headers, rows) + note
 
