@@ -21,12 +21,13 @@ import pandas as pd
 
 from src.analysis.features import MarketFeatures
 from src.analysis.indicators import slope_pct, sma
-from src.screener.setups import AVOID, SETUP_QUALITY, Setup
+from src.screener.setups import AVOID, Setup, setup_quality
 from src.screener.strategy import StrategyConfig
 from src.screener.trade_plan import TradePlan
 from src.utils.numeric import clamp
 
 RS_NORM = 0.15  # +/-15% blended outperformance spans the 0..1 RS scale
+DISTRIBUTION_DISCOUNT = 0.90  # multiplier applied when up/down volume < 1.0
 
 
 @dataclass(frozen=True)
@@ -61,13 +62,18 @@ def confidence_score(
     components = {
         'trend': features.trend_score,
         'rs': _relative_strength_component(features),
-        'setup': SETUP_QUALITY[setup.setup_type],
+        'setup': setup_quality(features, setup),
         'volume': _volume_component(features),
         'contraction': _contraction_component(features.contraction_ratio),
         'reward': _reward_component(plan.reward_risk, config),
     }
     weights = config.confidence_weights
     score = sum(weights[name] * value for name, value in components.items())
+    # Net distribution (more down- than up-volume) is a red flag that roughly
+    # halved realized expectancy in backtests; discount the score rather than
+    # zero it, so a strong setup under light distribution can still qualify.
+    if features.updown_volume_ratio < 1.0:
+        score *= DISTRIBUTION_DISCOUNT
     return round(100 * clamp(score), 1)
 
 

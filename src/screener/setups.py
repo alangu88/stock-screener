@@ -44,6 +44,25 @@ SETUP_QUALITY = {
     AVOID: 0.0,
 }
 
+# A Pullback that has slipped below its rising trend EMA (it fell to the slower
+# MA instead of holding the fast one) gave back roughly half its expectancy in
+# walk-forward tests (0.19R vs 0.31-0.39R for pullbacks holding above the EMA,
+# ~1,450 vs ~1,990 trades). Discount its setup quality so the weaker variant is
+# ranked down and filtered by the confidence gate rather than treated as equal.
+PULLBACK_BELOW_EMA_PENALTY = 0.7
+
+
+def setup_quality(features: MarketFeatures, setup: Setup) -> float:
+    """Setup-family quality, context-adjusted for realized-edge modifiers."""
+    base = SETUP_QUALITY[setup.setup_type]
+    if (
+        setup.setup_type == PULLBACK
+        and features.ema_trend
+        and features.price < features.ema_trend
+    ):
+        base *= PULLBACK_BELOW_EMA_PENALTY
+    return base
+
 
 @dataclass(frozen=True)
 class Setup:
