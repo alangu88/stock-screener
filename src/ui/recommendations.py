@@ -145,6 +145,7 @@ def _find_recommendations(
             min_confidence=min_conf,
             min_reward_risk=min_rr,
             min_avg_volume=settings.min_avg_volume,
+            require_regime=settings.require_regime_for_adds,
         )
         recs = engine.screen(rec_universe, config=rec_config)
         recs = recs.sort_values('Rank Score', ascending=False).reset_index(drop=True)

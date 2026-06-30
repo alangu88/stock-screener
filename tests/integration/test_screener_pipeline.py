@@ -90,6 +90,56 @@ def test_analyze_returns_row_per_ticker_with_actionable_flag():
     assert {'Entry', 'Stop', 'Target', 'R/R', 'Confidence'}.issubset(out.columns)
 
 
+class _RiskOffClient(FakeClient):
+    """Same breakouts as ``FakeClient`` but a benchmark in a risk-off downtrend."""
+
+    def fetch_history(self, tickers, period='2y', interval='1d', force_refresh=False):
+        data = super().fetch_history(tickers, period, interval, force_refresh)
+        if 'SPY' in data:
+            idx = data['SPY'].index
+            # Falling SPY: last close sits below its 200-day SMA (risk-off).
+            data['SPY']['Close'] = pd.Series(
+                [400.0 - i * 0.3 for i in range(len(idx))], index=idx
+            )
+        return data
+
+
+def test_require_regime_suppresses_adds_when_risk_off():
+    engine = ScreenerEngine(client=_RiskOffClient())
+    universe = UniverseResult(tickers=['AAA', 'BBB'], companies={'AAA': 'A Co', 'BBB': 'B Co'})
+
+    gated = engine.screen(
+        universe,
+        FilterConfig(min_confidence=45.0, min_reward_risk=1.5,
+                     min_avg_volume=100, require_regime=True),
+    )
+    ungated = engine.screen(
+        universe,
+        FilterConfig(min_confidence=45.0, min_reward_risk=1.5,
+                     min_avg_volume=100, require_regime=False),
+    )
+
+    # The same breakouts qualify without the gate, but the risk-off regime
+    # suppresses every add once the gate is on.
+    assert not ungated.empty
+    assert gated.empty
+
+
+def test_require_regime_allows_adds_when_risk_on():
+    engine = ScreenerEngine(client=FakeClient())
+    universe = UniverseResult(tickers=['AAA', 'BBB'], companies={'AAA': 'A Co', 'BBB': 'B Co'})
+
+    out = engine.screen(
+        universe,
+        FilterConfig(min_confidence=45.0, min_reward_risk=1.5,
+                     min_avg_volume=100, require_regime=True),
+    )
+
+    # SPY is in an uptrend here, so the regime gate is a no-op.
+    assert not out.empty
+
+
+
 def test_analyze_includes_non_actionable_rows():
     engine = ScreenerEngine(client=FakeClient())
     universe = UniverseResult(tickers=['AAA'], companies={'AAA': 'A Co'})

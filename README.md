@@ -331,6 +331,12 @@ Core allocation targets **60–70%**
 **individual-stock cap** (`SCREENER_MAX_INDIVIDUAL_STOCKS`, ETFs excluded).
 Recommended Adds uses tight gates by default (confidence ≥ 85, R/R ≥ 2.5).
 
+New adds are also **paused in a risk-off regime** — when SPY trades below its
+long (200-day) moving average — because backtests show entries taken below the
+200-day roughly halve expectancy. Set `SCREENER_REQUIRE_REGIME_FOR_ADDS=false`
+to keep surfacing adds regardless of regime (held positions are unaffected either
+way and still show their plans).
+
 ### Daily report
 
 Generate a local Markdown snapshot (positions status, add sizes, recommended

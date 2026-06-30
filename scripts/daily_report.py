@@ -657,8 +657,16 @@ def _recommendations_section(
     current_values: dict[str, float] | None = None,
     open_risk_pct: float = 0.0,
     cash: float | None = None,
+    risk_on: bool = True,
 ) -> str:
     if recs is None or recs.empty:
+        if settings.require_regime_for_adds and not risk_on:
+            return (
+                '## Recommended adds\n\nNo adds — **risk-off regime** (SPY below its '
+                '200-day). New entries are paused: in backtests, adds taken below the '
+                '200-day roughly halve expectancy, so the screen sits out until the '
+                'market reclaims its trend.'
+            )
         return (
             '## Recommended adds\n\nNo high-conviction adds today — sitting tight '
             f'(gates: confidence ≥ {_num(settings.rec_min_confidence, 0)}, '
@@ -880,7 +888,7 @@ def _build_report(
         _stops_section(monitor, lookup, settings),
         _watchlist_section(watch_monitor, lookup, account_value, settings, open_risk_pct, cash),
         _recommendations_section(
-            recs, rec_etfs, account_value, settings, held_values, open_risk_pct, cash
+            recs, rec_etfs, account_value, settings, held_values, open_risk_pct, cash, risk_on
         ),
         _concentration_section(monitor, analysis, etfs, settings),
     ]
@@ -1022,6 +1030,7 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
         min_confidence=settings.rec_min_confidence,
         min_reward_risk=settings.rec_min_reward_risk,
         min_avg_volume=settings.min_avg_volume,
+        require_regime=settings.require_regime_for_adds,
     )
     analysis = engine.analyze(UniverseResult(tickers=universe, companies={}), config=gate_config)
     etfs = _etf_tickers(client, universe)

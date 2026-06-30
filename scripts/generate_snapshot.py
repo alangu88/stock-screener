@@ -129,6 +129,7 @@ def main() -> int:
             min_confidence=settings.rec_min_confidence,
             min_reward_risk=settings.rec_min_reward_risk,
             min_avg_volume=settings.min_avg_volume,
+            require_regime=settings.require_regime_for_adds,
         )
         recommended = engine.screen(add_universe, config=add_config)
 

@@ -51,6 +51,7 @@ class Settings:
     watchlist_auto_confidence: float = 80.0  # adds at/above this confidence auto-join watchlist.txt
     suggested_add_fraction: float = 0.5  # starter tranche as a fraction of the max add (scale-in)
     suggested_add_trigger_r: float = 1.0  # add the remainder once the trade is +this many R
+    require_regime_for_adds: bool = True  # pause new adds while SPY is below its long SMA (risk-off)
 
     # Swing-trading management for satellites (on by default; cores unaffected)
     swing_mode: bool = True
@@ -165,6 +166,7 @@ def load_settings() -> Settings:
         ('watchlist_auto_confidence', 'WATCHLIST_AUTO_CONFIDENCE', float),
         ('suggested_add_fraction', 'SUGGESTED_ADD_FRACTION', float),
         ('suggested_add_trigger_r', 'SUGGESTED_ADD_TRIGGER_R', float),
+        ('require_regime_for_adds', 'REQUIRE_REGIME_FOR_ADDS', _as_bool),
         ('swing_mode', 'SWING_MODE', _as_bool),
         ('swing_time_stop_bars', 'SWING_TIME_STOP_BARS', int),
         ('swing_extended_atr', 'SWING_EXTENDED_ATR', float),

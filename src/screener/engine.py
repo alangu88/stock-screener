@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from src.analysis.features import MarketFeatures, compute_features
+from src.analysis.indicators import sma
 from src.config import Settings
 from src.data.universe import UniverseResult
 from src.data.yahoo_client import Fundamentals, YahooFinanceClient
@@ -74,6 +75,7 @@ class _ScreenInputs:
     history: dict[str, pd.DataFrame]
     benchmark_close: pd.Series
     context: MarketContext
+    regime_ok: bool
 
 
 @dataclass
@@ -89,6 +91,7 @@ class FilterConfig:
     min_reward_risk: float = 1.5
     min_avg_volume: int = 500_000
     setups: tuple[str, ...] | None = None  # None => all actionable setups
+    require_regime: bool = False  # when True, suppress new adds in a risk-off regime
 
     @classmethod
     def from_settings(cls, settings: Settings) -> FilterConfig:
@@ -174,7 +177,8 @@ class ScreenerEngine:
         history = self.client.fetch_history(allowed, period=HISTORY_PERIOD, force_refresh=force_refresh)
         benchmark_close = self._benchmark_close(force_refresh)
         context = assess_market_context(benchmark_close, self.strategy)
-        return _ScreenInputs(fundamentals, allowed, history, benchmark_close, context)
+        regime_ok = _regime_ok(benchmark_close, self.strategy)
+        return _ScreenInputs(fundamentals, allowed, history, benchmark_close, context, regime_ok)
 
     def _benchmark_close(self, force_refresh: bool) -> pd.Series:
         history = self.client.fetch_history([BENCHMARK_TICKER], period=HISTORY_PERIOD, force_refresh=force_refresh)
@@ -193,6 +197,10 @@ class ScreenerEngine:
             ticker, inputs.history.get(ticker), inputs.benchmark_close, inputs.fundamentals, universe
         )
         if analysis is None or not self._passes_gates(analysis, config):
+            return None
+        # Risk-off regime gate: backtests show entries taken while SPY trades
+        # below its long SMA roughly halve expectancy, so suppress new adds.
+        if config.require_regime and not inputs.regime_ok:
             return None
         rank = composite_rank(analysis.confidence, inputs.context)
         return _result_row(
@@ -302,6 +310,19 @@ def _result_row(
         'Price': features.price,
         'Market Context': context.label,
     }
+
+
+def _regime_ok(benchmark_close: pd.Series, strategy: StrategyConfig) -> bool:
+    """True when the benchmark trades at/above its long SMA (risk-on).
+
+    Mirrors the backtested ``require_regime`` gate: entries taken only while the
+    benchmark holds above its long moving average earn materially higher
+    expectancy. Fails open (``True``) when there is too little history to judge.
+    """
+    close = benchmark_close.dropna()
+    if len(close) < strategy.ma_long:
+        return True
+    return float(close.iloc[-1]) >= float(sma(close, strategy.ma_long).iloc[-1])
 
 
 def _empty_frame() -> pd.DataFrame:

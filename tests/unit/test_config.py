@@ -80,6 +80,14 @@ def test_load_settings_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.risk_per_trade == 0.02
 
 
+def test_require_regime_for_adds_defaults_on_and_reads_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert load_settings().require_regime_for_adds is True
+    monkeypatch.setenv('SCREENER_REQUIRE_REGIME_FOR_ADDS', 'false')
+    assert load_settings().require_regime_for_adds is False
+
+
 def test_strategy_confidence_weights_must_sum_to_one() -> None:
     import dataclasses as dc
 
