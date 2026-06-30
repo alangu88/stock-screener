@@ -27,14 +27,20 @@ PULLBACK = 'Pullback'
 AVOID = 'Avoid'
 
 # Relative quality of each setup family, weighted toward *realized* edge.
-# Backtesting (survivorship-biased, relative) found Pullbacks the most robust,
-# statistically significant edge and Contractions close behind, while Breakouts
-# were positive but weak/insignificant; Reversal was removed for negative
-# expectancy. The ordering reflects that evidence rather than a fixed prior.
+# Walk-forward backtests (full S&P 500, 5y, regime-on, conf>=75 / R:R>=2.5, with
+# the structural target exit held constant) found Breakouts the strongest setup
+# by a wide margin -- ExpR 0.84R vs 0.36R for Pullbacks across 305 vs 1647
+# trades, with ~2.3x the Sharpe and profit factor (2.53 vs 1.54) and a higher
+# win rate (45% vs 33%). Pullbacks remain the workhorse on volume; Contractions
+# sit between. Breakout quality is therefore at parity with Pullbacks rather
+# than discounted. Reversal was removed earlier for negative expectancy. These
+# weights reflect that evidence; re-run scripts/backtest_stops.py --by-setup to
+# revisit. (Breakouts are the most regime-sensitive family, so this assumes the
+# live risk-on gate stays on.)
 SETUP_QUALITY = {
     PULLBACK: 0.88,
+    BREAKOUT: 0.88,
     CONTRACTION: 0.84,
-    BREAKOUT: 0.74,
     AVOID: 0.0,
 }
 
