@@ -34,6 +34,7 @@ from src.data.cache import SQLiteCache  # noqa: E402
 from src.data.universe import load_sp500_universe  # noqa: E402
 from src.data.yahoo_client import YahooFinanceClient  # noqa: E402
 from src.screener.advisor import _conviction_risk  # noqa: E402
+from src.screener.setups import BREAKOUT, PULLBACK  # noqa: E402
 from src.screener.strategy import StrategyConfig  # noqa: E402
 
 BENCHMARK = 'SPY'
@@ -66,8 +67,8 @@ def _cagr(start: float, end: float, years: float) -> float:
     return (end / start) ** (1 / years) - 1 if years > 0 and start > 0 else 0.0
 
 
-# (entry_date, exit_date, r_multiple, confidence)
-Trade = tuple[pd.Timestamp, pd.Timestamp, float, float]
+# (entry_date, exit_date, r_multiple, confidence, setup)
+Trade = tuple[pd.Timestamp, pd.Timestamp, float, float, str]
 
 
 def _resolve_trades(
@@ -93,23 +94,27 @@ def _resolve_trades(
             continue
         pos = df.index.get_loc(e.date)
         exit_pos = min(pos + max(res.bars_held, 1), len(df.index) - 1)
-        trades.append((e.date, df.index[exit_pos], res.r_multiple, e.confidence))
+        trades.append((e.date, df.index[exit_pos], res.r_multiple, e.confidence, e.setup))
     trades.sort(key=lambda t: t[0])
     return trades
 
 
 def _equity_curve(
     trades: list[Trade], settings, max_concurrent: int, cost: float,
+    setup_mults: dict[str, float] | None = None,
 ) -> tuple[float, list[float]]:
     """Compound trades into an equity curve under a concurrent-position cap.
 
     Equity is allocated at entry and realized at exit so concurrent trades share
     capital (no fake leverage); risk per trade scales with conviction (2% cap).
+    ``setup_mults`` optionally tilts per-trade risk by setup family (e.g. larger
+    for breakouts); the product is still hard-capped at ``conviction_risk_max``.
     """
+    cap = settings.conviction_risk_max
     equity = 1.0
     open_pos: list[tuple[pd.Timestamp, float, float]] = []  # (exit, alloc, r)
     events: list[tuple[pd.Timestamp, float]] = []
-    for entry_date, exit_date, r_mult, conf in trades:
+    for entry_date, exit_date, r_mult, conf, setup in trades:
         matured = [op for op in open_pos if op[0] <= entry_date]
         open_pos = [op for op in open_pos if op[0] > entry_date]
         for ex, alloc, r in sorted(matured):
@@ -117,7 +122,9 @@ def _equity_curve(
             events.append((ex, equity))
         if len(open_pos) >= max_concurrent:
             continue
-        alloc = equity * _conviction_risk(settings, conf)
+        mult = setup_mults.get(setup, 1.0) if setup_mults else 1.0
+        risk = min(_conviction_risk(settings, conf) * mult, cap)
+        alloc = equity * risk
         open_pos.append((exit_date, alloc, r_mult))
     for ex, alloc, r in sorted(open_pos):
         equity += alloc * (r - cost)
@@ -170,22 +177,35 @@ def main() -> int:
 
     variant = _exit_variant(args.exit)
     trades = _resolve_trades(entries, histories, strategy, variant)
-    equity, curve = _equity_curve(trades, settings, args.max_concurrent, args.cost_bps / 10_000.0)
 
     years = (bench.index[-1] - bench.index[0]).days / 365.25
     spy_ret = bench.iloc[-1] / bench.iloc[0] - 1.0
-    monthly = pd.Series(curve).pct_change().dropna()
-    sharpe = (monthly.mean() / monthly.std() * math.sqrt(252 / args.step)) if monthly.std() else 0.0
+    cost = args.cost_bps / 10_000.0
+    n_breakout = sum(1 for t in trades if t[4] == BREAKOUT)
+    n_pullback = sum(1 for t in trades if t[4] == PULLBACK)
 
-    print(f'\nTrades: {len(trades)} | window: {years:.1f}y | cost: {args.cost_bps:.0f} bps round-trip'
-          f' | exit: {variant.name}')
-    print(f'{"Strategy":<14}{"TotRet":>9}{"CAGR":>8}{"MaxDD":>8}{"Sharpe":>8}')
-    print('-' * 47)
-    print(f'{"Portfolio":<14}{equity-1:>8.1%}{_cagr(1,equity,years):>8.1%}'
-          f'{_drawdown(curve):>8.1%}{sharpe:>8.2f}')
-    print(f'{"SPY hold":<14}{spy_ret:>8.1%}{_cagr(1,1+spy_ret,years):>8.1%}{"":>8}{"":>8}')
-    edge = _cagr(1, equity, years) - _cagr(1, 1 + spy_ret, years)
-    print(f'\nCAGR edge vs SPY: {edge:+.1%}')
+    # Sizing schemes compared on an identical trade stream. The tilt multiplies
+    # conviction risk by setup family (breakout up, pullback down), still capped.
+    schemes: list[tuple[str, dict[str, float] | None]] = [
+        ('Conviction', None),
+        ('Tilt 1.25/.80', {BREAKOUT: 1.25, PULLBACK: 0.80}),
+        ('Tilt 1.50/.65', {BREAKOUT: 1.50, PULLBACK: 0.65}),
+        ('Breakout-only', {BREAKOUT: 1.50, PULLBACK: 0.0}),
+    ]
+
+    print(f'\nTrades: {len(trades)} ({n_breakout} breakout / {n_pullback} pullback) | '
+          f'window: {years:.1f}y | cost: {args.cost_bps:.0f} bps | exit: {variant.name}')
+    print(f'{"Sizing":<16}{"TotRet":>9}{"CAGR":>8}{"MaxDD":>8}{"Sharpe":>8}{"MAR":>7}')
+    print('-' * 56)
+    for label, mults in schemes:
+        equity, curve = _equity_curve(trades, settings, args.max_concurrent, cost, mults)
+        monthly = pd.Series(curve).pct_change().dropna()
+        sharpe = (monthly.mean() / monthly.std() * math.sqrt(252 / args.step)) if monthly.std() else 0.0
+        cagr = _cagr(1, equity, years)
+        mdd = _drawdown(curve)
+        mar = cagr / abs(mdd) if mdd < 0 else float('inf')
+        print(f'{label:<16}{equity-1:>8.1%}{cagr:>8.1%}{mdd:>8.1%}{sharpe:>8.2f}{mar:>7.2f}')
+    print(f'{"SPY hold":<16}{spy_ret:>8.1%}{_cagr(1,1+spy_ret,years):>8.1%}{"":>8}{"":>8}{"":>7}')
     return 0
 
 
