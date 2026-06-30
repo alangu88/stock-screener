@@ -148,6 +148,10 @@ def main() -> int:
     parser.add_argument('--period', default='10y')
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--buckets', type=int, default=4)
+    parser.add_argument(
+        '--min-relvol', type=float, default=None,
+        help='Only analyze breakouts with rel_volume >= this (conditional/independence test).',
+    )
     args = parser.parse_args()
 
     settings = load_settings()
@@ -184,6 +188,13 @@ def main() -> int:
     if not records:
         print('No breakout entries captured.')
         return 0
+
+    if args.min_relvol is not None:
+        records = [r for r in records if r['rel_volume (surge)'] >= args.min_relvol]
+        print(f'\n[conditional] rel_volume >= {args.min_relvol:g}')
+        if not records:
+            print('No breakout entries in this subset.')
+            return 0
 
     rs = [r['r'] for r in records]
     mean = sum(rs) / len(rs)
