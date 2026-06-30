@@ -46,7 +46,7 @@ class Settings:
     core_allocation_min: float = 0.60
     core_allocation_max: float = 0.70
     max_individual_stocks: int = 10
-    rec_min_confidence: float = 75.0
+    rec_min_confidence: float = 80.0
     rec_min_reward_risk: float = 2.5
     watchlist_auto_confidence: float = 80.0  # adds at/above this confidence auto-join watchlist.txt
     suggested_add_fraction: float = 0.5  # starter tranche as a fraction of the max add (scale-in)
