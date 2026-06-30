@@ -51,6 +51,14 @@ SETUP_QUALITY = {
 # ranked down and filtered by the confidence gate rather than treated as equal.
 PULLBACK_BELOW_EMA_PENALTY = 0.7
 
+# Breakouts confirm on volume, and surge magnitude is a clean, monotonic edge
+# predictor: over a 10y S&P 500 replay, breakouts on < ~1.7x average volume
+# realized ~0.46-0.53R versus ~0.77R above it (win 36% vs 45%). A marginal-volume
+# breakout (just clearing the breakout_volume_mult gate) is the weak cohort, so
+# discount it; strong-volume breakouts keep full setup quality.
+BREAKOUT_STRONG_VOLUME_MULT = 1.7
+BREAKOUT_WEAK_VOLUME_PENALTY = 0.85
+
 
 def setup_quality(features: MarketFeatures, setup: Setup) -> float:
     """Setup-family quality, context-adjusted for realized-edge modifiers."""
@@ -61,6 +69,8 @@ def setup_quality(features: MarketFeatures, setup: Setup) -> float:
         and features.price < features.ema_trend
     ):
         base *= PULLBACK_BELOW_EMA_PENALTY
+    if setup.setup_type == BREAKOUT and features.rel_volume < BREAKOUT_STRONG_VOLUME_MULT:
+        base *= BREAKOUT_WEAK_VOLUME_PENALTY
     return base
 
 
