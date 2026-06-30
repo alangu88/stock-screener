@@ -51,6 +51,14 @@ SETUP_QUALITY = {
 # ranked down and filtered by the confidence gate rather than treated as equal.
 PULLBACK_BELOW_EMA_PENALTY = 0.7
 
+# A constructive Pullback contracts toward support. One whose short-term
+# volatility is still EXPANDING (short/long ATR > ~1.25) is not an orderly dip --
+# over a 10y S&P 500 replay these realized ~0.07R (26% win) versus ~0.4-0.75R for
+# pullbacks that were contracting. Demote them; this is orthogonal to the
+# below-EMA penalty (a measure of volatility, not location).
+PULLBACK_EXPANDING_VOL_RATIO = 1.25
+PULLBACK_EXPANDING_VOL_PENALTY = 0.85
+
 # Breakouts confirm on volume, and surge magnitude is a clean, monotonic edge
 # predictor: over a 10y S&P 500 replay, breakouts on < ~1.7x average volume
 # realized ~0.46-0.53R versus ~0.77R above it (win 36% vs 45%). A marginal-volume
@@ -76,6 +84,8 @@ def setup_quality(features: MarketFeatures, setup: Setup) -> float:
         and features.price < features.ema_trend
     ):
         base *= PULLBACK_BELOW_EMA_PENALTY
+    if setup.setup_type == PULLBACK and features.contraction_ratio > PULLBACK_EXPANDING_VOL_RATIO:
+        base *= PULLBACK_EXPANDING_VOL_PENALTY
     if setup.setup_type == BREAKOUT:
         if features.rel_volume < BREAKOUT_STRONG_VOLUME_MULT:
             base *= BREAKOUT_WEAK_VOLUME_PENALTY
