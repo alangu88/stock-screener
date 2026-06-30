@@ -46,7 +46,7 @@ class Settings:
     core_allocation_min: float = 0.60
     core_allocation_max: float = 0.70
     max_individual_stocks: int = 10
-    rec_min_confidence: float = 70.0
+    rec_min_confidence: float = 75.0
     rec_min_reward_risk: float = 2.5
     watchlist_auto_confidence: float = 80.0  # adds at/above this confidence auto-join watchlist.txt
     suggested_add_fraction: float = 0.5  # starter tranche as a fraction of the max add (scale-in)
@@ -60,6 +60,11 @@ class Settings:
     scaleout_alert_pct: float = 0.03  # flag holdings within this % below a scale-out level
     earnings_blackout_days: int = 7  # flag holdings/adds within N days of earnings
     dividend_lookback_days: int = 7  # first-run window for the income-to-reconcile digest
+
+    # Present-state Chandelier trailing stop for satellites (cost-basis anchored)
+    trail_atr_mult: float = 3.0  # trail at highest-high - this * ATR (3.0 = best-backtested)
+    trail_lookback_bars: int = 22  # highest-high window for the trail (present-state, no entry date)
+    trail_breakeven_r: float = 1.0  # lock the trail at cost once up this many trail-widths (R)
 
     def __post_init__(self) -> None:
         positive = {
@@ -82,6 +87,9 @@ class Settings:
             'dividend_lookback_days': self.dividend_lookback_days,
             'suggested_add_fraction': self.suggested_add_fraction,
             'suggested_add_trigger_r': self.suggested_add_trigger_r,
+            'trail_atr_mult': self.trail_atr_mult,
+            'trail_lookback_bars': self.trail_lookback_bars,
+            'trail_breakeven_r': self.trail_breakeven_r,
         }
         for name, value in positive.items():
             if value <= 0:
@@ -173,6 +181,9 @@ def load_settings() -> Settings:
         ('scaleout_alert_pct', 'SCALEOUT_ALERT_PCT', float),
         ('earnings_blackout_days', 'EARNINGS_BLACKOUT_DAYS', int),
         ('dividend_lookback_days', 'DIVIDEND_LOOKBACK_DAYS', int),
+        ('trail_atr_mult', 'TRAIL_ATR_MULT', float),
+        ('trail_lookback_bars', 'TRAIL_LOOKBACK_BARS', int),
+        ('trail_breakeven_r', 'TRAIL_BREAKEVEN_R', float),
     )
 
     values = {}

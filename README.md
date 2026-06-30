@@ -329,13 +329,26 @@ once, while adding earlier (+0.5R) or never completing the add both underperform
 Core allocation targets **60–70%**
 (`SCREENER_CORE_ALLOCATION_MIN` / `_MAX`), and the app flags when you exceed the
 **individual-stock cap** (`SCREENER_MAX_INDIVIDUAL_STOCKS`, ETFs excluded).
-Recommended Adds uses tight gates by default (confidence ≥ 85, R/R ≥ 2.5).
+Recommended Adds uses tight gates by default (confidence ≥ 75, R/R ≥ 2.5).
 
 New adds are also **paused in a risk-off regime** — when SPY trades below its
 long (200-day) moving average — because backtests show entries taken below the
 200-day roughly halve expectancy. Set `SCREENER_REQUIRE_REGIME_FOR_ADDS=false`
 to keep surfacing adds regardless of regime (held positions are unaffected either
 way and still show their plans).
+
+The **Stops & alerts** section gives each satellite a single price-alert level
+to set at Fidelity (fractional lots can't hold resting stop orders). The alert
+starts at the structural stop, steps up to your **cost (breakeven)** once a name
+is up more than its stop distance, then **trails** under a present-state
+**Chandelier stop** (highest high over `SCREENER_TRAIL_LOOKBACK_BARS` − `SCREENER_TRAIL_ATR_MULT`×ATR,
+floored at cost once far enough ahead) as the trade runs — always raised, never
+lowered. The trail depends only on recent price action and your cost basis (no
+entry date or entry-setup label), and the table shows the **$ at risk** you'd
+give back if the alert triggers. A portfolio backtest (`scripts/backtest_portfolio.py --exit be-chandelier`)
+found a breakeven-then-Chandelier trail compounds materially better than holding
+to the structural stop — it frees capital faster so more setups compound — at
+comparable drawdown.
 
 ### Daily report
 
@@ -379,6 +392,8 @@ available variables. The most commonly adjusted values:
 | `SCREENER_SMA_SHORT_WINDOW` / `SCREENER_SMA_LONG_WINDOW` | `50` / `200` | Trend MAs |
 | `SCREENER_EMA_WINDOW` | `20` | Fast EMA |
 | `SCREENER_ATR_PERIOD` / `SCREENER_ATR_STOP_MULTIPLIER` | `14` / `2.0` | Volatility + stop cushion |
+| `SCREENER_TRAIL_ATR_MULT` / `SCREENER_TRAIL_LOOKBACK_BARS` | `3.0` / `22` | Present-state Chandelier trailing stop (highest high over the lookback − ATR×mult) |
+| `SCREENER_TRAIL_BREAKEVEN_R` | `1.0` | Trail-widths above cost before the trail floors at breakeven |
 | `SCREENER_CORE_ALLOCATION` | `0.70` | Core sleeve share of capital |
 | `SCREENER_CORE_SCORE_THRESHOLD` | `0.60` | Core vs Satellite cutoff |
 | `SCREENER_MAX_POSITION_WEIGHT` | `0.10` | Per-name position cap |

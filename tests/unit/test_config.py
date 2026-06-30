@@ -88,6 +88,18 @@ def test_require_regime_for_adds_defaults_on_and_reads_env(
     assert load_settings().require_regime_for_adds is False
 
 
+def test_trail_settings_default_and_read_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    s = Settings()
+    assert (s.trail_atr_mult, s.trail_lookback_bars, s.trail_breakeven_r) == (3.0, 22, 1.0)
+    with pytest.raises(ConfigError):
+        dataclasses.replace(Settings(), trail_atr_mult=0.0)
+    monkeypatch.setenv('SCREENER_TRAIL_ATR_MULT', '2.5')
+    monkeypatch.setenv('SCREENER_TRAIL_LOOKBACK_BARS', '15')
+    loaded = load_settings()
+    assert loaded.trail_atr_mult == 2.5
+    assert loaded.trail_lookback_bars == 15
+
+
 def test_strategy_confidence_weights_must_sum_to_one() -> None:
     import dataclasses as dc
 

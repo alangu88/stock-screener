@@ -38,6 +38,7 @@ from src.screener.advisor import (  # noqa: E402
     active_scale_rank,
     add_sizing,
     analysis_lookup,
+    chandelier_trail,
     confirmation_add,
     core_action,
     core_rebalance,
@@ -558,16 +559,23 @@ def _scaleout_section(
     return '## Scale-out ladder\n\n' + _md_table(headers, rows) + note
 
 
-def _stops_section(monitor: pd.DataFrame, lookup: dict, settings: Settings) -> str:
+def _stops_section(
+    monitor: pd.DataFrame, lookup: dict, settings: Settings,
+    history: dict[str, pd.DataFrame] | None = None,
+) -> str:
     """Fidelity-ready stop-alert levels for satellite holdings, nearest first.
 
     Most fractional lots cannot carry a resting stop order at Fidelity, so this
     lists the price to set a **price alert** at plus the next stop action. The
-    alert sits at the structural stop, then steps up to your cost (breakeven)
-    once a position is up more than its stop distance so a winner cannot turn
-    into a loss. Core sleeves are managed long-term and excluded. Empty when no
-    satellite holding has a usable stop.
+    alert starts at the structural stop, steps up to your cost (breakeven) once a
+    position is up more than its stop distance, then **trails** up under a
+    present-state Chandelier stop (highest high minus an ATR multiple) as the
+    trade runs -- always the highest protective level, never lowered. ``$ at
+    risk`` is what you stand to give back from here if the alert triggers
+    (shares x distance to the alert). Core sleeves are managed long-term and
+    excluded. Empty when no satellite holding has a usable stop.
     """
+    history = history or {}
     show_acct = has_accounts(monitor)
     entries = []
     for _, r in monitor.iterrows():
@@ -581,21 +589,32 @@ def _stops_section(monitor: pd.DataFrame, lookup: dict, settings: Settings) -> s
             continue
         price = float(price)
         stop_f = float(stop)
+        shares_f = float(shares)
         pnl = r.get('Unreal P&L %')
         risk_pct = (price - stop_f) / price
         cost = price / (1 + float(pnl)) if not _isna(pnl) and float(pnl) > -1 else None
         up_one_r = not _isna(pnl) and risk_pct > 0 and float(pnl) >= risk_pct
+        trail = chandelier_trail(history.get(str(r['Ticker'])), cost, settings)
         if price <= stop_f:
             alert, note = stop_f, 'Sell now \u2014 stop hit'
-        elif up_one_r and cost is not None and cost > stop_f:
-            alert, note = cost, 'Tighten to breakeven (cost)'
         else:
+            # Trail up: take the highest protective level that still sits below
+            # price. The Chandelier trail only ever raises the alert (it is a
+            # ratcheting stop); when it sits above price it is ignored here so a
+            # fixed-lookback breach never fires a false "sell now" that would
+            # contradict the present-state action on a normal pullback.
             alert, note = stop_f, 'Alert at structural stop'
+            if up_one_r and cost is not None and cost > alert and cost < price:
+                alert, note = cost, 'Tighten to breakeven (cost)'
+            if trail is not None and trail > alert and trail < price:
+                alert, note = trail, 'Trail \u2014 Chandelier stop'
         gap = (alert - price) / price
+        at_risk = shares_f * (price - alert) if price > alert else 0.0
         row = [str(r['Ticker'])]
         if show_acct:
             row.append(_text(r.get('Account')))
-        row += [_num(float(shares), 3), _money(price), _money(alert), _pct(gap), note]
+        row += [_num(shares_f, 3), _money(price), _money(alert), _pct(gap),
+                _money(at_risk), note]
         entries.append((gap, row))
     if not entries:
         return ''
@@ -604,14 +623,16 @@ def _stops_section(monitor: pd.DataFrame, lookup: dict, settings: Settings) -> s
     headers = ['Ticker']
     if show_acct:
         headers.append('Account')
-    headers += ['Shares', 'Price', 'Alert at', '% to alert', 'Next step']
+    headers += ['Shares', 'Price', 'Alert at', '% to alert', '$ at risk', 'Next step']
     note = _escape_dollars(
         '\n\n_Set a Fidelity **price alert** at each **Alert at** level (fractional shares '
         'can\u2019t hold resting stop orders); when it fires, sell the position manually. The '
-        'alert sits at the structural stop, then steps up to your **cost (breakeven)** once a '
-        'name is up more than its stop distance \u2014 raise it further under new structure '
-        'after each scale-out, never lower. **% to alert** is the cushion before it triggers '
-        '(negative = price still above the alert; 0 = triggering; positive = already through it)._'
+        'alert starts at the structural stop, steps up to your **cost (breakeven)** once a '
+        'name is up more than its stop distance, then **trails** under a Chandelier stop '
+        f'(highest high \u2212 {_num(settings.trail_atr_mult)}\u00d7ATR) as the trade runs '
+        '\u2014 always raise it, never lower. **$ at risk** is what you give back from here if '
+        'the alert triggers; **% to alert** is the cushion before it does (negative = price '
+        'still above the alert; 0 = triggering; positive = already through it)._'
     )
     return '## Stops & alerts\n\n' + _md_table(headers, rows) + note
 
@@ -857,6 +878,7 @@ def _build_report(
     earnings: set[str] | None = None,
     income: list[IncomeEvent] | None = None,
     harvested: dict[str, int] | None = None,
+    history: dict[str, pd.DataFrame] | None = None,
 ) -> str:
     lookup = analysis_lookup(analysis)
     harvested = harvested or {}
@@ -885,7 +907,7 @@ def _build_report(
         _holdings_section(monitor, lookup, account_value, settings, open_risk_pct, cash,
                           harvested),
         _scaleout_section(monitor, lookup, settings, harvested),
-        _stops_section(monitor, lookup, settings),
+        _stops_section(monitor, lookup, settings, history),
         _watchlist_section(watch_monitor, lookup, account_value, settings, open_risk_pct, cash),
         _recommendations_section(
             recs, rec_etfs, account_value, settings, held_values, open_risk_pct, cash, risk_on
@@ -1063,6 +1085,7 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
         earnings=earnings_soon(client, held, settings.earnings_blackout_days),
         income=income,
         harvested=harvested,
+        history=history,
     )
     status = (f'{len(monitor)} holding(s), {len(watch_monitor)} watch, '
               f'{len(recs)} recommendation(s).')

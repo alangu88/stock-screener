@@ -9,6 +9,7 @@ from src.screener.advisor import (
     active_scale_rank,
     add_sizing,
     analysis_lookup,
+    chandelier_trail,
     confirmation_add,
     core_rebalance,
     extended_price,
@@ -29,6 +30,35 @@ from src.screener.sizing import PositionSizing
 
 SETTINGS = Settings()
 SWING = Settings(swing_mode=True)
+
+
+def _ohlc(closes: list[float]) -> pd.DataFrame:
+    idx = pd.date_range('2024-01-01', periods=len(closes), freq='B')
+    close = pd.Series(closes, index=idx, dtype=float)
+    return pd.DataFrame({'High': close * 1.01, 'Low': close * 0.99, 'Close': close})
+
+
+def test_chandelier_trail_none_for_short_history():
+    df = _ohlc([10.0] * (SETTINGS.atr_period - 1))
+    assert chandelier_trail(df, 9.0, SETTINGS) is None
+    assert chandelier_trail(None, 9.0, SETTINGS) is None
+
+
+def test_chandelier_trail_sits_below_price_in_uptrend():
+    df = _ohlc([float(p) for p in range(100, 140)])
+    price = float(df['Close'].iloc[-1])
+    trail = chandelier_trail(df, 100.0, SETTINGS)
+    assert trail is not None
+    assert trail < price
+
+
+def test_chandelier_trail_floors_at_cost_when_far_ahead():
+    df = _ohlc([float(p) for p in range(100, 200)])
+    cost = 195.0  # within a trail-width of the recent high, so breakeven floor applies
+    raw = chandelier_trail(_ohlc([float(p) for p in range(100, 200)]), 0.0, SETTINGS)
+    floored = chandelier_trail(df, cost, SETTINGS)
+    assert raw is not None and floored is not None
+    assert floored >= raw
 
 
 def test_is_core_case_insensitive():

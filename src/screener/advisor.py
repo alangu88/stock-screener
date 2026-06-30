@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.analysis.indicators import atr
 from src.config import Settings
 from src.screener.holdings import CORE, AllocationStats, count_individual_stocks
 from src.screener.sizing import SHARE_PRECISION, PositionSizing, suggest_add_size
@@ -314,6 +315,42 @@ def extended_price(ema20, settings: Settings) -> float | None:
     if _isna(ema20) or float(ema20) <= 0:
         return None
     return float(ema20) * (1 + settings.swing_extended_atr)
+
+
+def chandelier_trail(df: pd.DataFrame | None, cost_basis, settings: Settings) -> float | None:
+    """Present-state Chandelier trailing stop, breakeven-locked at cost.
+
+    ``trail = highest_high(last trail_lookback_bars) - trail_atr_mult * ATR``.
+    Once price is up at least one trail-width (``trail_breakeven_r`` * width)
+    above the cost basis, the trail is floored at cost so a clear winner cannot
+    round-trip into a loss.
+
+    This is a pure function of *recent price action* plus your cost basis -- no
+    entry date and no entry-setup label -- so it respects a present-state,
+    risk-anchored management style. Returns ``None`` when there is too little
+    history or no usable ATR.
+    """
+    if df is None or df.empty or 'Close' not in df.columns:
+        return None
+    close = df['Close'].dropna()
+    if len(close) < settings.atr_period + 1:
+        return None
+    high = df['High'].reindex(close.index).fillna(close) if 'High' in df.columns else close
+    low = df['Low'].reindex(close.index).fillna(close) if 'Low' in df.columns else close
+    atr_series = atr(high, low, close, settings.atr_period).dropna()
+    if atr_series.empty:
+        return None
+    atr_val = float(atr_series.iloc[-1])
+    if atr_val <= 0:
+        return None
+    width = settings.trail_atr_mult * atr_val
+    high_water = float(high.tail(settings.trail_lookback_bars).max())
+    trail = high_water - width
+    price = float(close.iloc[-1])
+    if not _isna(cost_basis) and float(cost_basis) > 0 and \
+            price >= float(cost_basis) + settings.trail_breakeven_r * width:
+        trail = max(trail, float(cost_basis))
+    return trail
 
 
 def core_action(monitor_row) -> str:
