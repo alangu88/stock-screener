@@ -70,6 +70,66 @@ def test_failed_refresh_falls_back_to_cache(tmp_path):
     assert float(out['AAA']['Close'].iloc[-1]) == 1.0  # served stale, not dropped
 
 
+def _live_client(tmp_path, base, tail, calls):
+    client = YahooFinanceClient(Settings(), SQLiteCache(tmp_path))
+
+    def fake_batch(tickers, period='2y', interval='1d'):
+        calls.append((period, sorted(tickers)))
+        frame = tail if period == '5d' else base
+        return {t: frame.copy() for t in tickers}
+
+    client._download_batch = fake_batch  # type: ignore[assignment]
+    return client
+
+
+def _dated(closes, dates):
+    return pd.DataFrame({'Close': closes}, index=pd.to_datetime(dates))
+
+
+def test_fetch_history_live_splices_fresh_tail(tmp_path):
+    calls: list[tuple[str, list[str]]] = []
+    base = _dated([10.0, 11.0], ['2026-06-26', '2026-06-29'])
+    tail = _dated([11.0, 12.5], ['2026-06-29', '2026-06-30'])
+    client = _live_client(tmp_path, base, tail, calls)
+
+    out = client.fetch_history_live(['AAA'], period='2y', tail_period='5d')
+
+    assert ('2y', ['AAA']) in calls  # long window pulled once
+    assert ('5d', ['AAA']) in calls  # plus the cheap tail
+    assert list(out['AAA']['Close']) == [10.0, 11.0, 12.5]
+    assert float(out['AAA']['Close'].iloc[-1]) == 12.5  # fresh latest price
+
+
+def test_fetch_history_live_reuses_cached_window_on_rerun(tmp_path):
+    calls: list[tuple[str, list[str]]] = []
+    base = _dated([10.0, 11.0], ['2026-06-26', '2026-06-29'])
+    tail = _dated([11.0, 12.5], ['2026-06-29', '2026-06-30'])
+    client = _live_client(tmp_path, base, tail, calls)
+    client.fetch_history_live(['AAA'], period='2y', tail_period='5d')
+
+    calls.clear()
+    client.fetch_history_live(['AAA'], period='2y', tail_period='5d')
+
+    periods = [p for p, _ in calls]
+    assert '2y' not in periods  # 2y served from cache, not re-downloaded
+    assert '5d' in periods  # only the tail is re-pulled
+
+
+def test_fetch_history_live_keeps_cache_when_tail_fails(tmp_path):
+    calls: list[tuple[str, list[str]]] = []
+    base = _dated([10.0, 11.0], ['2026-06-26', '2026-06-29'])
+    client = YahooFinanceClient(Settings(), SQLiteCache(tmp_path))
+
+    def fake_batch(tickers, period='2y', interval='1d'):
+        calls.append((period, sorted(tickers)))
+        return {} if period == '5d' else {t: base.copy() for t in tickers}
+
+    client._download_batch = fake_batch  # type: ignore[assignment]
+
+    out = client.fetch_history_live(['AAA'], period='2y', tail_period='5d')
+    assert float(out['AAA']['Close'].iloc[-1]) == 11.0  # cached close kept, not blanked
+
+
 def test_fundamentals_cached_with_separate_long_ttl(monkeypatch):
     """Fundamentals must persist on their own (longer) TTL, not the price TTL."""
     captured: dict[str, int] = {}

@@ -119,6 +119,43 @@ class YahooFinanceClient:
 
         return result
 
+    def fetch_history_live(
+        self,
+        tickers: list[str],
+        period: str = '2y',
+        interval: str = '1d',
+        tail_period: str = '5d',
+    ) -> dict[str, pd.DataFrame]:
+        """Serve the full ``period`` window from cache, refreshing only the tail.
+
+        The bulky long window is reused from the cache and never re-downloaded;
+        only the most recent ``tail_period`` bars are pulled and spliced on top.
+        That keeps same-day reruns cheap and captures a fresh latest price at run
+        time without the rate-limit failures a full long-window refresh of the
+        whole universe tends to trigger. A failed tail download keeps the cached
+        copy rather than blanking the name.
+        """
+        sorted_tickers = sorted(set(tickers))
+        result = self.fetch_history(sorted_tickers, period=period, interval=interval)
+        tail = self._download_batch(sorted_tickers, period=tail_period, interval=interval)
+        ttl_seconds = self.settings.cache_ttl_hours * 3600
+        for ticker in sorted_tickers:
+            recent = tail.get(ticker)
+            if recent is None or recent.empty:
+                continue
+            base = result.get(ticker)
+            merged = recent if base is None or base.empty else self._splice_tail(base, recent)
+            result[ticker] = merged
+            self.cache.set(f'history:{ticker}:{period}:{interval}', merged, ttl_seconds=ttl_seconds)
+        return result
+
+    @staticmethod
+    def _splice_tail(base: pd.DataFrame, recent: pd.DataFrame) -> pd.DataFrame:
+        """Overlay fresh ``recent`` bars onto ``base``, replacing same-dated rows."""
+        combined = pd.concat([base, recent])
+        combined = combined[~combined.index.duplicated(keep='last')]
+        return combined.sort_index()
+
     def _download_batch(
         self, tickers: list[str], period: str = '2y', interval: str = '1d'
     ) -> dict[str, pd.DataFrame]:

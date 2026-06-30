@@ -25,7 +25,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.config import Settings, load_settings  # noqa: E402
 from src.data.cache import SQLiteCache  # noqa: E402
-from src.data.market import earnings_soon, market_is_open, regime_risk_on  # noqa: E402
+from src.data.market import earnings_soon, regime_risk_on  # noqa: E402
 from src.data.universe import UniverseResult, load_sp500_universe  # noqa: E402
 from src.data.yahoo_client import YahooFinanceClient  # noqa: E402
 from src.export.markdown_format import number as _fmt_number  # noqa: E402
@@ -94,6 +94,8 @@ INCOME_LEDGER_PATH = REPORTS_DIR / '.income_ledger.json'
 SCALEOUT_LEDGER_PATH = REPORTS_DIR / '.scaleout_ledger.json'
 
 HISTORY_PERIOD = '2y'
+# Same-day reruns only re-pull this short tail; the 2y window stays cached.
+INTRADAY_TAIL_PERIOD = '5d'
 FUND_QUOTE_TYPES = {'ETF', 'MUTUALFUND'}
 _LOGGER = get_logger('daily_report')
 
@@ -999,10 +1001,12 @@ def _generate_report(client, engine, cache, settings: Settings, generated_at: st
     held = [e.ticker for e in merged]
     watch = [t for t in _followed_tickers() if t not in set(held)]
     universe = [*held, *watch]
-    # Keep the portfolio + watchlist live intraday; the broad S&P universe used
-    # for recommendations stays on the normal cache to avoid Yahoo throttling.
-    refresh = universe if market_is_open() else None
-    history = client.fetch_history(universe, period=HISTORY_PERIOD, refresh_tickers=refresh)
+    # Reuse the cached 2y window and refresh only the latest bars so a same-day
+    # rerun captures the current price cheaply -- without re-downloading 2 years
+    # for the whole universe, which throttles and fails on Yahoo.
+    history = client.fetch_history_live(
+        universe, period=HISTORY_PERIOD, tail_period=INTRADAY_TAIL_PERIOD
+    )
     monitor = build_monitor(merged, history, settings)
     watch_monitor = build_monitor([PositionEntry(t, sleeve=SATELLITE) for t in watch], history, settings)
     held_value = float(monitor['Value'].dropna().sum())
