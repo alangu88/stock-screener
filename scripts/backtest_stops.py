@@ -122,6 +122,10 @@ def main() -> int:
     parser.add_argument('--force-refresh', action='store_true', help='Bypass the cache.')
     parser.add_argument('--by-setup', action='store_true', help='Also break down by setup.')
     parser.add_argument(
+        '--by-confidence', action='store_true',
+        help='Break down expectancy by confidence band (model calibration check).'
+    )
+    parser.add_argument(
         '--events', action='store_true',
         help='Break down expectancy by major market-stress windows (entry date).'
     )
@@ -204,6 +208,24 @@ def main() -> int:
             sub_stats = [summarize(v.name, sub_results[v.name]) for v in variants]
             print(f'\n--- Setup: {setup} ({len(subset)} entries) ---')
             _print_table(sub_stats)
+
+    if args.by_confidence:
+        bands = [(0, 80), (80, 85), (85, 90), (90, 95), (95, 100.01)]
+        structural = next(v for v in variants if v.name.startswith('Structural'))
+        print('\n--- Calibration: Structural expectancy by confidence band ---')
+        print(f"{'Band':<12} {'Trades':>6} {'ExpR':>7} {'Win%':>6} {'PF':>6} {'TotR':>8}")
+        print('-' * 48)
+        for lo, hi in bands:
+            subset = [e for e in all_entries if lo <= e.confidence < hi]
+            if not subset:
+                continue
+            sub_results = simulate_entries(subset, histories, variants, strategy.atr_period)
+            s = summarize(structural.name, sub_results[structural.name])
+            pf = ' inf' if s.profit_factor == float('inf') else f'{s.profit_factor:6.2f}'
+            print(
+                f'{f"{lo:g}-{hi:g}":<12} {s.trades:>6} {s.expectancy_r:>7.3f} '
+                f'{s.win_rate * 100:>5.1f}% {pf} {s.total_r:>8.1f}'
+            )
 
     if args.events:
         for name, (start, end) in EVENTS.items():
