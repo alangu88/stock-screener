@@ -19,36 +19,39 @@ and organizes survivors into a Core / Satellite portfolio.
 > Generated on demand via the **Daily Screen** workflow or `python scripts/generate_snapshot.py`. Mechanical, research-only.
 
 <!-- SCREENER:START -->
-![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-22-blue) ![Adds](https://img.shields.io/badge/adds-9-success)
+![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-25-blue) ![Adds](https://img.shields.io/badge/adds-1-success)
 
-_Last updated: 2026-06-30 13:52 UTC_
+_Last updated: 2026-07-01 00:30 UTC_
 
-> **Parameters:** Risk/trade 1% · Core band 60%–70% · Add gates conf ≥ 70 & R/R ≥ 2.5 · Max 10 single-stock names · Max position 10%
+> **Parameters:** Risk/trade 1% · Core band 60%–70% · Add gates conf ≥ 80 & R/R ≥ 2.5 · Max 10 single-stock names · Max position 10%
 
 #### Watchlist (your holdings + followed names)
 
 | Ticker | Setup | Confidence | R/R | Entry | Stop | Target | Rank Score | Actionable |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| COHR | Pullback | 79 | 3.07 | 398.00 | 350.24 | 544.52 | 78.80 | Yes |
-| FSELX | Pullback | 72 | 2.36 | 69.05 | 61.00 | 88.06 | 72.10 | No |
+| CGNX | Breakout | 82 | 1.71 | 72.42 | 63.73 | 87.24 | 82.50 | Yes |
+| COHR | Pullback | 77 | 3.07 | 398.00 | 350.24 | 544.52 | 76.70 | Yes |
+| FSELX | Pullback | 70 | 2.36 | 69.05 | 61.00 | 88.06 | 70.00 | No |
 | VTI | Pullback | 63 | 1.91 | 368.20 | 355.12 | 393.12 | 62.90 | Yes |
-| VXUS | Pullback | 62 | 3.01 | 85.16 | 81.88 | 95.02 | 62.20 | Yes |
-| AMD | Avoid | 0 | 2.68 | 550.82 | 486.98 | 722.22 | 0.00 | No |
-| AAPL | Avoid | 0 | 3.31 | 284.94 | 271.77 | 328.59 | 0.00 | No |
-| DELL | Avoid | 0 | 4.85 | 421.38 | 371.44 | 663.58 | 0.00 | No |
+| VXUS | Pullback | 56 | 3.01 | 85.16 | 81.88 | 95.02 | 55.90 | Yes |
 | AVGO | Avoid | 0 | 7.04 | 375.93 | 356.81 | 510.47 | 0.00 | No |
 | AMZN | Avoid | 0 | 5.62 | 239.57 | 230.81 | 288.77 | 0.00 | No |
+| AAPL | Avoid | 0 | 3.31 | 284.94 | 271.77 | 328.59 | 0.00 | No |
+| AMD | Avoid | 0 | 2.68 | 550.82 | 486.98 | 722.22 | 0.00 | No |
 | GOOGL | Avoid | 0 | 3.28 | 351.16 | 327.28 | 429.57 | 0.00 | No |
-| META | Avoid | 0 | 5.16 | 555.63 | 535.69 | 658.45 | 0.00 | No |
-| MSFT | Avoid | 0 | 4.59 | 371.43 | 345.92 | 488.55 | 0.00 | No |
+| DELL | Avoid | 0 | 4.85 | 421.38 | 371.44 | 663.58 | 0.00 | No |
 | LLY | Avoid | 0 | 1.81 | 1,213.19 | 1,070.06 | 1,472.32 | 0.00 | No |
 | LRCX | Avoid | 0 | 3.31 | 432.93 | 380.98 | 604.73 | 0.00 | No |
-| NFLX | Avoid | 0 | 6.55 | 73.42 | 70.28 | 94.04 | 0.00 | No |
 | MU | Avoid | 0 | 4.38 | 1,147.95 | 1,010.20 | 1,750.74 | 0.00 | No |
-| NOW | Avoid | 0 | 4.84 | 98.17 | 87.88 | 147.97 | 0.00 | No |
+| NFLX | Avoid | 0 | 6.55 | 73.42 | 70.28 | 94.04 | 0.00 | No |
+| META | Avoid | 0 | 5.16 | 555.63 | 535.69 | 658.45 | 0.00 | No |
+| MSFT | Avoid | 0 | 4.59 | 371.43 | 345.92 | 488.55 | 0.00 | No |
 | NVDA | Avoid | 0 | 5.07 | 197.46 | 189.08 | 239.94 | 0.00 | No |
-| SNDK | Avoid | 0 | 4.19 | 2,143.05 | 1,885.88 | 3,220.11 | 0.00 | No |
+| NOW | Avoid | 0 | 4.84 | 98.17 | 87.88 | 147.97 | 0.00 | No |
 | PLTR | Avoid | 0 | 5.28 | 115.68 | 104.82 | 173.01 | 0.00 | No |
+| ROK | Avoid | 0 | 1.99 | 488.05 | 452.36 | 559.20 | 0.00 | No |
+| TSLA | Avoid | 0 | 7.34 | 411.64 | 401.15 | 488.64 | 0.00 | No |
+| SNDK | Avoid | 0 | 4.19 | 2,143.05 | 1,885.88 | 3,220.11 | 0.00 | No |
 | TSM | Avoid | 0 | 1.87 | 463.64 | 414.57 | 555.38 | 0.00 | No |
 | XOM | Avoid | 0 | 23.76 | 135.77 | 134.57 | 164.50 | 0.00 | No |
 
@@ -56,15 +59,7 @@ _Last updated: 2026-06-30 13:52 UTC_
 
 | Ticker | Setup | Sleeve | Entry | Stop | Target | R/R | Confidence | Rank Score | Position Size % |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| STX | Pullback | Core | 971.91 | 855.29 | 1,594.86 | 5.34 | 86 | 86.10 | 7.42% |
-| COHR | Pullback | Core | 398.00 | 350.24 | 544.52 | 3.07 | 79 | 78.80 | 6.79% |
-| EXPD | Pullback | Core | 161.38 | 153.29 | 182.92 | 2.66 | 77 | 76.60 | 10.00% |
-| ELV | Pullback | Core | 385.83 | 378.73 | 472.72 | 12.24 | 76 | 76.50 | 10.00% |
-| EBAY | Pullback | Core | 110.28 | 104.11 | 133.74 | 3.80 | 76 | 75.70 | 10.00% |
-| RL | Pullback | Core | 397.52 | 349.82 | 525.97 | 2.69 | 75 | 75.30 | 6.49% |
-| SW | Pullback | Core | 45.59 | 40.12 | 60.19 | 2.67 | 74 | 73.60 | 6.35% |
-| IBKR | Pullback | Core | 88.18 | 78.34 | 116.56 | 2.89 | 72 | 72.50 | 6.73% |
-| JBL | Pullback | Core | 378.50 | 333.08 | 535.94 | 3.47 | 72 | 72.10 | 6.22% |
+| STX | Pullback | Core | 971.91 | 855.29 | 1,594.86 | 5.34 | 84 | 84.00 | 10.00% |
 
 > Mechanical signals for research only — not trade recommendations.
 <!-- SCREENER:END -->
