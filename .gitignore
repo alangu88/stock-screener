@@ -233,4 +233,6 @@ scripts/research_setup.py
 src/backtest/runner.py
 src/backtest/stops.py
 src/backtest/parallel.py
+src/backtest/feature_panel.py
 tests/unit/test_backtest_stops.py
+tests/unit/test_feature_panel.py

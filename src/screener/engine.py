@@ -284,7 +284,15 @@ class ScreenerEngine:
 
 
 def _result_row(
-    ticker, company_name, fundamental, features, setup, plan, confidence, rank, context
+    ticker: str,
+    company_name: str,
+    fundamental: Fundamentals,
+    features: MarketFeatures,
+    setup: Setup,
+    plan: TradePlan,
+    confidence: float,
+    rank: float,
+    context: MarketContext,
 ) -> dict:
     return {
         'Ticker': ticker,

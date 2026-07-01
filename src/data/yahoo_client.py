@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -231,10 +231,17 @@ class YahooFinanceClient:
             if not force_refresh:
                 cached = self.cache.get(cache_key(ticker))
                 if cached is not None:
-                    result = from_cache(cached)
-                    if result is not None:
-                        output[ticker] = result
-                    continue
+                    try:
+                        result = from_cache(cached)
+                    except (TypeError, KeyError, ValueError, AttributeError) as exc:
+                        # A cache entry whose schema drifted (field added/removed)
+                        # is dropped and refetched rather than allowed to abort
+                        # the whole batch.
+                        self.logger.warning('Discarding unreadable cache for %s: %s', ticker, exc)
+                    else:
+                        if result is not None:
+                            output[ticker] = result
+                        continue  # valid hit, including a negative-cached miss
             to_fetch.append(ticker)
 
         if not to_fetch:
@@ -242,10 +249,17 @@ class YahooFinanceClient:
 
         workers = max(1, min(self.settings.fundamentals_max_workers, len(to_fetch)))
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            results = executor.map(fetch_one, to_fetch)
-        for ticker, result in zip(to_fetch, results, strict=True):
-            if result is not None:
-                output[ticker] = result
+            future_to_ticker = {executor.submit(fetch_one, ticker): ticker for ticker in to_fetch}
+            for future in as_completed(future_to_ticker):
+                ticker = future_to_ticker[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    # One ticker's unexpected failure must not lose the batch.
+                    self.logger.warning('Fetch failed for %s: %s', ticker, exc)
+                    continue
+                if result is not None:
+                    output[ticker] = result
         return output
 
     def fetch_fundamentals(
@@ -394,7 +408,7 @@ class YahooFinanceClient:
         return entry
 
 
-def _coerce_number(value) -> float | None:
+def _coerce_number(value: Any) -> float | None:
     if value is None:
         return None
     try:

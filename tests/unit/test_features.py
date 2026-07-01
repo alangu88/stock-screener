@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.analysis.features import MIN_BARS, compute_feature_panel, compute_features, features_at
+from src.analysis.features import MIN_BARS, compute_features
 from src.screener.strategy import StrategyConfig
 
 CONFIG = StrategyConfig()
@@ -52,37 +52,4 @@ def test_insufficient_history_returns_none():
 def test_missing_columns_returns_none():
     df = pd.DataFrame({'Open': [1, 2, 3]})
     assert compute_features(df, _benchmark(), CONFIG) is None
-
-
-def _wiggly_frame(periods: int = 320) -> pd.DataFrame:
-    import math
-    idx = pd.date_range('2023-01-02', periods=periods, freq='B')
-    close = pd.Series([50.0 + 0.1 * i + 6 * math.sin(i / 9.0) for i in range(periods)], index=idx)
-    vol = pd.Series([800_000.0 + 50_000 * math.sin(i / 4.0) for i in range(periods)], index=idx)
-    return pd.DataFrame(
-        {'Open': close - 0.3, 'High': close + 1.2, 'Low': close - 1.1, 'Close': close, 'Volume': vol},
-        index=idx,
-    )
-
-
-def test_panel_matches_per_bar_compute():
-    """features_at over a precomputed panel must equal expanding compute_features."""
-    df = _wiggly_frame()
-    bench = pd.Series(
-        [100.0 + 0.15 * i for i in range(len(df))], index=df.index
-    )
-    panel = compute_feature_panel(df, bench, CONFIG)
-    assert panel is not None
-    close = df['Close']
-    for pos in range(MIN_BARS, len(df), 7):
-        date = close.index[pos]
-        expected = compute_features(df.loc[:date], bench.loc[:date], CONFIG)
-        got = features_at(panel, pos, CONFIG)
-        assert expected is not None and got is not None
-        for field in expected.__dataclass_fields__:
-            ev, gv = getattr(expected, field), getattr(got, field)
-            if isinstance(ev, float):
-                assert abs(ev - gv) < 1e-9, f'{field} @ {pos}: {ev} != {gv}'
-            else:
-                assert ev == gv, f'{field} @ {pos}: {ev} != {gv}'
 
