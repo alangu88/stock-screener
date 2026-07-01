@@ -43,6 +43,7 @@ from src.screener.holdings import (  # noqa: E402
 )
 from src.screener.portfolio import PortfolioConfig  # noqa: E402
 from src.screener.strategy import StrategyConfig  # noqa: E402
+from src.utils.files import read_text_or_empty  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
 
 README_PATH = _REPO_ROOT / 'README.md'
@@ -64,21 +65,17 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _read(path: Path) -> str:
-    return path.read_text(encoding='utf-8') if path.exists() else ''
-
-
 def _held_tickers() -> set[str]:
     """Tickers already held (committed composition merged with private sizes)."""
-    portfolio_entries = parse_portfolio(_read(PORTFOLIO_PATH))
-    position_entries = parse_positions(_read(POSITIONS_PATH))
+    portfolio_entries = parse_portfolio(read_text_or_empty(PORTFOLIO_PATH))
+    position_entries = parse_positions(read_text_or_empty(POSITIONS_PATH))
     merged = merge_holdings(portfolio_entries, position_entries)
     return {normalize_ticker(entry.ticker) for entry in merged}
 
 
 def _followed_and_held(held: set[str]) -> list[str]:
     """Followed names plus all held positions, normalized and de-duplicated."""
-    followed = {normalize_ticker(entry.ticker) for entry in parse_portfolio(_read(WATCHLIST_PATH))}
+    followed = {normalize_ticker(entry.ticker) for entry in parse_portfolio(read_text_or_empty(WATCHLIST_PATH))}
     return sorted(followed | held)
 
 

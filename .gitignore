@@ -222,3 +222,15 @@ positions.txt
 
 # Locally generated daily reports (may reference private sizing)
 reports/
+
+# Local-only research & backtesting (the R&D used to build/validate the model
+# stays private; only the live model and its performance metrics are public)
+scripts/backtest_portfolio.py
+scripts/backtest_scalein.py
+scripts/backtest_stops.py
+scripts/research_runner.py
+scripts/research_setup.py
+src/backtest/runner.py
+src/backtest/stops.py
+src/backtest/parallel.py
+tests/unit/test_backtest_stops.py

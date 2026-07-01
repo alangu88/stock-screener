@@ -34,7 +34,9 @@ Repository = "https://github.com/alangu88/stock-screener"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.2.0,<10.0",
+    "pytest-cov>=5.0.0,<7.0",
     "ruff>=0.6.0,<1.0",
+    "mypy>=1.11.0,<2.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -52,9 +54,39 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
+# Line length is owned by the formatter (ruff format), not the linter, so E501
+# is not enforced as a lint error -- the standard ruff pairing.
 ignore = ["E501"]
 
-[tool.black]
-line-length = 100
-target-version = ["py311"]
+[tool.ruff.format]
+# Match the codebase's established single-quote style.
+quote-style = "single"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# Gradual-typing baseline: structural checks (undefined names, bad attributes,
+# import errors, wrong call signatures) are enforced. pandas exposes Series /
+# DataFrame.get() values as a broad ``Any | None``, which would otherwise flood
+# every guarded float() coercion and arithmetic op with false positives, so
+# those value-level codes are tolerated until the data layer grows stricter types.
+disable_error_code = ["arg-type", "operator", "assignment", "index", "union-attr", "misc"]
+
+# numpy ships PEP 695 stubs that mypy cannot parse under python_version 3.11; skip
+# following them (runtime behaviour is unaffected -- this is static analysis only).
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
 

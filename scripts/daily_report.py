@@ -85,6 +85,7 @@ from src.screener.scaleout import (  # noqa: E402
     update_scaleout_ledger,
 )
 from src.screener.strategy import StrategyConfig  # noqa: E402
+from src.utils.files import read_text_or_empty  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
 
 PORTFOLIO_FILE = _REPO_ROOT / 'portfolio.txt'
@@ -100,6 +101,14 @@ HISTORY_PERIOD = '2y'
 INTRADAY_TAIL_PERIOD = '5d'
 FUND_QUOTE_TYPES = {'ETF', 'MUTUALFUND'}
 _LOGGER = get_logger('daily_report')
+
+# Traffic-light status glyphs. Named because raw emoji are hard to tell apart in
+# source, and the colour carries meaning (health / urgency) at each call site.
+STATUS_RED = '\U0001f534'
+STATUS_AMBER = '\U0001f7e1'
+STATUS_GREEN = '\U0001f7e2'
+STATUS_BLUE = '\U0001f535'
+DASH = '\u2014'  # placeholder for a missing / not-applicable table cell
 
 
 # --------------------------------------------------------------------------- #
@@ -153,7 +162,7 @@ def _md_table(headers: list[str], rows: list[list[str]], *, align: list[str] | N
 
 
 _NUMERIC_CELL = re.compile(r'^[-+]?\$?\d[\d,]*(\.\d+)?%?$')
-_NEUTRAL_CELLS = {'', '\u2014', '-'}
+_NEUTRAL_CELLS = {'', DASH, '-'}
 
 
 def _column_alignments(headers: list[str], rows: list[list[str]]) -> list[str]:
@@ -171,21 +180,17 @@ def _status_dot(row, action: str) -> str:
     """Traffic-light health for a holding row, present-state (trend + action)."""
     vs200 = row.get('% vs SMA200')
     if action.startswith(('Exit', 'Cut')) or (not _isna(vs200) and float(vs200) < 0):
-        return '\U0001f534'  # red: trend broken / exit
+        return STATUS_RED  # trend broken / exit
     if action.startswith(('Trim', 'Take profit', 'Review')) or 'extended' in action.lower():
-        return '\U0001f7e1'  # amber: take-profit / caution
-    return '\U0001f7e2'  # green: healthy / hold / add / let-run
+        return STATUS_AMBER  # take-profit / caution
+    return STATUS_GREEN  # healthy / hold / add / let-run
 
 
 # --------------------------------------------------------------------------- #
 # Data helpers.
 # --------------------------------------------------------------------------- #
-def _read(path: Path) -> str:
-    return path.read_text(encoding='utf-8') if path.exists() else ''
-
-
 def _followed_tickers() -> list[str]:
-    return [e.ticker for e in parse_portfolio(_read(WATCHLIST_FILE))]
+    return [e.ticker for e in parse_portfolio(read_text_or_empty(WATCHLIST_FILE))]
 
 
 def _auto_add_to_watchlist(
@@ -210,7 +215,7 @@ def _auto_add_to_watchlist(
         added.append(ticker)
         skip.add(ticker)
     if added:
-        text = _read(WATCHLIST_FILE).rstrip('\n')
+        text = read_text_or_empty(WATCHLIST_FILE).rstrip('\n')
         WATCHLIST_FILE.write_text(text + '\n' + '\n'.join(added) + '\n', encoding='utf-8')
     return added
 
@@ -232,6 +237,14 @@ def _market_context(*frames: pd.DataFrame) -> str:
             if value:
                 return str(value)
     return 'Unknown'
+
+
+def _positive(value) -> float | None:
+    """Coerce ``value`` to a positive float, or ``None`` when missing/non-positive."""
+    if _isna(value):
+        return None
+    number = float(value)
+    return number if number > 0 else None
 
 
 # --------------------------------------------------------------------------- #
@@ -261,14 +274,14 @@ def _snapshot_section(
         ])
     count = count_individual_stocks(monitor, etfs)
     cap = settings.max_individual_stocks
-    flag = ' \u26a0\ufe0f over cap' if count > cap else (' (near cap)' if count >= cap - 2 else '')
+    flag = ' ⚠️ over cap' if count > cap else (' (near cap)' if count >= cap - 2 else '')
     metrics.append(['Individual stocks', f'{count} / {cap}{flag}'])
 
     alloc = allocation_summary(monitor, settings.core_allocation_min, settings.core_allocation_max)
     if alloc is not None:
         metrics.append([
             'Core allocation',
-            f'{_pct(alloc.core_pct)} of {_pct(alloc.target_min)}\u2013'
+            f'{_pct(alloc.core_pct)} of {_pct(alloc.target_min)}–'
             f'{_pct(alloc.target_max)} target ({alloc.label})',
         ])
 
@@ -276,7 +289,7 @@ def _snapshot_section(
     cap_pct = settings.max_portfolio_risk
     risk_value = f'{_pct(risk_pct)} of {_pct(cap_pct)} cap ({_money(open_risk)} in stops)'
     if risk_pct >= cap_pct:
-        risk_value += ' \u2014 \u26a0\ufe0f at cap, adds paused'
+        risk_value += ' — ⚠️ at cap, adds paused'
     metrics.append(['Risk budget', risk_value])
 
     lines: list[str] = ['## Snapshot', '']
@@ -292,9 +305,9 @@ def _nearest_scaleout(monitor_row, analysis_row: dict, settings: Settings):
     ``settings.scaleout_alert_pct`` below it. Levels already reached are skipped
     (those become live ``Take profit`` actions instead).
     """
-    price = monitor_row.get('Price')
-    shares = monitor_row.get('Shares')
-    if _isna(price) or float(price) <= 0 or _isna(shares) or float(shares) <= 0:
+    price = _positive(monitor_row.get('Price'))
+    shares = _positive(monitor_row.get('Shares'))
+    if price is None or shares is None:
         return None
     levels = [
         ('+2R', r_multiple_price(analysis_row.get('Entry'), analysis_row.get('Stop'), 2.0)),
@@ -302,15 +315,15 @@ def _nearest_scaleout(monitor_row, analysis_row: dict, settings: Settings):
     ]
     upcoming = [
         (lbl, float(lvl)) for lbl, lvl in levels
-        if lvl is not None and not _isna(lvl) and float(lvl) > float(price)
+        if lvl is not None and not _isna(lvl) and float(lvl) > price
     ]
     if not upcoming:
         return None
     lbl, level = min(upcoming, key=lambda kv: kv[1])
-    gap = (level - float(price)) / float(price)
+    gap = (level - price) / price
     if gap > settings.scaleout_alert_pct:
         return None
-    third = float(shares) / 3.0
+    third = shares / 3.0
     return lbl, level, third, third * level, gap
 
 
@@ -337,39 +350,39 @@ def _action_plan_section(
     watches: list[str] = []
 
     # Holdings -> sell / trim using the same per-row action.
-    for _, r in monitor.iterrows():
-        ticker = str(r['Ticker'])
-        a = lookup.get(ticker, {})
-        if is_core(r['Sleeve']):
+    for _, row in monitor.iterrows():
+        ticker = str(row['Ticker'])
+        plan = lookup.get(ticker, {})
+        if is_core(row['Sleeve']):
             continue
-        sizing = add_sizing(account_value, settings, a, float(r.get('Value') or 0.0), open_risk_pct)
-        rank = harvested.get(scaleout_key(r.get('Account'), ticker), 0)
-        action = satellite_action(r, a, sizing, bool(a.get('Actionable', False)), settings, rank)
-        label = f'{ticker} ({_text(r.get("Account"))})' if show_acct and r.get('Account') else ticker
+        sizing = add_sizing(account_value, settings, plan, float(row.get('Value') or 0.0), open_risk_pct)
+        rank = harvested.get(scaleout_key(row.get('Account'), ticker), 0)
+        action = satellite_action(row, plan, sizing, bool(plan.get('Actionable', False)), settings, rank)
+        label = f'{ticker} ({_text(row.get("Account"))})' if show_acct and row.get('Account') else ticker
         if action.startswith(('Exit', 'Cut')):
-            sells.append(f'\U0001f534 {label} \u2014 {action}')
+            sells.append(f'{STATUS_RED} {label} — {action}')
             continue
         if action.startswith(('Trim', 'Take profit')):
-            trims.append(f'\U0001f7e1 {label} \u2014 {action}')
+            trims.append(f'{STATUS_AMBER} {label} — {action}')
             continue
-        near = _nearest_scaleout(r, a, settings)
+        near = _nearest_scaleout(row, plan, settings)
         if near:
             lvl_label, level, sell_sh, sell_amt, gap = near
             watches.append(
-                f'\U0001f535 {label} \u2014 approaching {lvl_label} scale-out at '
-                f'{_money(level)} ({_pct(gap)} away), sell \u2153 \u2248 {_money(sell_amt)} '
+                f'{STATUS_BLUE} {label} — approaching {lvl_label} scale-out at '
+                f'{_money(level)} ({_pct(gap)} away), sell ⅓ ≈ {_money(sell_amt)} '
                 f'({_num(sell_sh, 3)} sh)'
             )
 
     # Recommended adds -> buys (suppressed when the market regime is risk-off).
     if risk_on and recs is not None and not recs.empty:
-        for _, r in recs.head(5).iterrows():
-            tag = ' \u26a0\ufe0f earnings soon' if str(r['Ticker']) in earnings else ''
+        for _, row in recs.head(5).iterrows():
+            tag = ' ⚠️ earnings soon' if str(row['Ticker']) in earnings else ''
             sizing = add_sizing(
-                account_value, settings, r.to_dict(), 0.0, open_risk_pct, cash_available=cash,
+                account_value, settings, row.to_dict(), 0.0, open_risk_pct, cash_available=cash,
             )
             sugg = suggested_add(sizing, settings)
-            conf = confirmation_add(sizing, settings, r.get('Entry'), r.get('Stop'))
+            conf = confirmation_add(sizing, settings, row.get('Entry'), row.get('Stop'))
             if sugg and sizing:
                 size_txt = f", add {_num(sugg[0], 3)} sh now ≈ {_money(sugg[1])}"
                 if conf:
@@ -382,16 +395,16 @@ def _action_plan_section(
             else:
                 size_txt = ''
             buys.append(
-                f"\U0001f7e2 {r['Ticker']} \u2014 {_text(r.get('Setup'))} near {_money(r.get('Entry'))} "
-                f"(R/R {_num(r.get('R/R'))}, conf {_int(r.get('Confidence'))}{tag}{size_txt})"
+                f"{STATUS_GREEN} {row['Ticker']} — {_text(row.get('Setup'))} near {_money(row.get('Entry'))} "
+                f"(R/R {_num(row.get('R/R'))}, conf {_int(row.get('Confidence'))}{tag}{size_txt})"
             )
 
     if not risk_on:
-        buy_text = 'paused \u2014 SPY below 200-day (risk-off regime)'
+        buy_text = 'paused — SPY below 200-day (risk-off regime)'
     elif buys and cash is not None and cash <= 0:
-        buy_text = 'no cash available \u2014 adds require freeing capital first'
+        buy_text = 'no cash available — adds require freeing capital first'
     else:
-        buy_text = '' if buys else 'nothing new \u2014 sit tight'
+        buy_text = '' if buys else 'nothing new — sit tight'
 
     def _block(title: str, items: list[str], inline: str = '') -> str:
         if inline:
@@ -400,7 +413,7 @@ def _action_plan_section(
             return f'- **{title}**: none'
         return f'- **{title}**\n' + '\n'.join(f'  - {it}' for it in items)
 
-    lines = ['## Today\u2019s plan', '']
+    lines = ['## Today’s plan', '']
     if cash is not None:
         lines.append(f'_Cash available: {_money(max(cash, 0.0))}._')
         lines.append('')
@@ -414,27 +427,29 @@ def _action_plan_section(
 def _legend_section(settings: Settings) -> str:
     return (
         '<details>\n<summary>How to read this report</summary>\n\n'
-        '- **Entry / Stop / Target / R/R** \u2014 a structural trade plan. For a name in a '
+        '- **Entry / Stop / Target / R/R** — a structural trade plan. For a name in a '
         'fresh setup these are the actual trigger levels; for every other holding they are '
-        '*management* estimates \u2014 **Stop** is a trailing exit just below support, **Target** '
+        '*management* estimates — **Stop** is a trailing exit just below support, **Target** '
         'is the measured-move upside, and **Entry** is the current reference price.\n'
         '- **Max add (risk)** — a per-trade risk *ceiling* in fractional shares, '
         f'risk-budgeted at {_pct(settings.risk_per_trade)} of the account per trade, '
         f'capped so no single position exceeds {_pct(settings.max_position_weight)} of the '
         'account, and further capped by your available cash. It is **not a recommendation to '
         'add**: it does not account for sector/theme concentration or your single-stock cap. '
-        'A dash means no room to add (already at the weight cap, no cash) or no valid level.\n'        '- **Suggested add** — a starter tranche, '
+        'A dash means no room to add (already at the weight cap, no cash) or no valid level.\n'
+        '- **Suggested add** — a starter tranche, '
         f'{_pct(settings.suggested_add_fraction)} of the max, to enter with now; add the '
         f'remainder once the trade is up +{_num(settings.suggested_add_trigger_r, 1)}R and move '
         'the stop to breakeven. Backtests show this staged entry roughly halves drawdown versus '
         'committing full size at once, while adding earlier or never completing the add both do '
-        'worse. Bounded by the same risk, weight, and cash caps.\n'        '- **Sleeve** \u2014 **Core** = long-term anchor (held through noise); **Satellite** = '
+        'worse. Bounded by the same risk, weight, and cash caps.\n'
+        '- **Sleeve** — **Core** = long-term anchor (held through noise); **Satellite** = '
         'tactical position managed with the trade plan.\n'
-        '- **% vs 200d** \u2014 distance above/below the 200-day average; the primary trend gauge. '
+        '- **% vs 200d** — distance above/below the 200-day average; the primary trend gauge. '
         'Negative means the long-term trend has rolled over.\n'
-        '- **R now** \u2014 open gain in R-multiples ((price\u2212entry)/(entry\u2212stop)); +1 means up one '
+        '- **R now** — open gain in R-multiples ((price−entry)/(entry−stop)); +1 means up one '
         'unit of risk. **% to stop** is the cushion before the exit triggers.\n'
-        '- **Action** \u2014 the suggested next step for that row, in plain language.'
+        '- **Action** — the suggested next step for that row, in plain language.'
         '\n\n</details>'
     )
 
@@ -463,51 +478,51 @@ def _holdings_section(
     )
     pos_rows = []
     plan_rows = []
-    for _, r in ordered.iterrows():
-        ticker = str(r['Ticker'])
-        a = lookup.get(ticker, {})
-        core = is_core(r['Sleeve'])
-        current_value = float(r['Value']) if not _isna(r.get('Value')) else 0.0
-        actionable = bool(a.get('Actionable', False))
+    for _, row in ordered.iterrows():
+        ticker = str(row['Ticker'])
+        plan = lookup.get(ticker, {})
+        core = is_core(row['Sleeve'])
+        current_value = float(row['Value']) if not _isna(row.get('Value')) else 0.0
+        actionable = bool(plan.get('Actionable', False))
         if core:
-            add_txt = '\u2014'
-            sugg_txt = '\u2014'
-            action = core_action(r)
+            add_txt = DASH
+            sugg_txt = DASH
+            action = core_action(row)
         else:
-            sizing = add_sizing(account_value, settings, a, current_value, open_risk_pct,
+            sizing = add_sizing(account_value, settings, plan, current_value, open_risk_pct,
                                 cash_available=cash)
-            rank = harvested.get(scaleout_key(r.get('Account'), ticker), 0)
-            action = satellite_action(r, a, sizing, actionable, settings, rank)
+            rank = harvested.get(scaleout_key(row.get('Account'), ticker), 0)
+            action = satellite_action(row, plan, sizing, actionable, settings, rank)
             can_add = not action.startswith(('Trim', 'Exit', 'Cut', 'Take profit'))
             add_txt = (
                 _num(sizing.shares, 3)
                 if can_add and sizing and sizing.shares > 0
-                else '\u2014'
+                else DASH
             )
             sugg = suggested_add(sizing, settings) if can_add else None
-            sugg_txt = _num(sugg[0], 3) if sugg else '\u2014'
-        r_now = open_r_multiple(r.get('Price'), a.get('Entry'), a.get('Stop'))
-        to_stop = pct_to_stop(r.get('Price'), a.get('Stop'))
+            sugg_txt = _num(sugg[0], 3) if sugg else DASH
+        r_now = open_r_multiple(row.get('Price'), plan.get('Entry'), plan.get('Stop'))
+        to_stop = pct_to_stop(row.get('Price'), plan.get('Stop'))
         lead = [ticker]
         if show_acct:
-            lead.append(_text(r.get('Account')))
+            lead.append(_text(row.get('Account')))
         pos_rows.append(lead + [
             'Core' if core else 'Satellite',
-            _status_dot(r, action),
-            _num(r.get('Shares'), 3),
-            _money(r.get('Price')),
-            _pct(r.get('% vs SMA200')),
-            _money(r.get('Value')),
-            _pct(r.get('Weight %')),
-            _pct(r.get('Unreal P&L %')),
+            _status_dot(row, action),
+            _num(row.get('Shares'), 3),
+            _money(row.get('Price')),
+            _pct(row.get('% vs SMA200')),
+            _money(row.get('Value')),
+            _pct(row.get('Weight %')),
+            _pct(row.get('Unreal P&L %')),
             action,
         ])
         plan_rows.append(lead + [
-            _money(a.get('Entry')),
-            _money(a.get('Stop')),
-            _money(a.get('Target')),
-            _num(a.get('R/R')),
-            _num(r_now, 1) if r_now is not None else '\u2014',
+            _money(plan.get('Entry')),
+            _money(plan.get('Stop')),
+            _money(plan.get('Target')),
+            _num(plan.get('R/R')),
+            _num(r_now, 1) if r_now is not None else DASH,
             _pct(to_stop),
             add_txt,
             sugg_txt,
@@ -544,15 +559,15 @@ def _scaleout_section(
         price: float, shares: float, level: float | None, taken: bool, folded: bool = False
     ) -> tuple[str, str]:
         if level is None or _isna(level):
-            return '\u2014', '\u2014'
+            return DASH, DASH
         if folded:  # leapfrogged by a higher-priority milestone -> won't fire separately
-            return _money(level), 'folded \u2014 +2R taken'
+            return _money(level), 'folded — +2R taken'
         if taken:  # already harvested -> show price for reference, no prompt
-            return _money(level), '\u2713 taken'
+            return _money(level), '✓ taken'
         third = shares / 3.0
-        amt = f'{_num(third, 3)} sh \u2248 {_money(third * float(level))}'
+        amt = f'{_num(third, 3)} sh ≈ {_money(third * float(level))}'
         if price >= float(level):  # already at/through the level -> act now
-            return f'{_money(level)} \u2705', f'now \u2014 {amt}'
+            return f'{_money(level)} ✅', f'now — {amt}'
         return _money(level), amt
 
     def _nearest_label(
@@ -564,26 +579,24 @@ def _scaleout_section(
             if g is not None and not taken
         ]
         if not cands:  # every available level already harvested
-            return float('inf'), '\u2713 scaled out'
+            return float('inf'), '✓ scaled out'
         gap, lbl = min(cands, key=lambda kv: kv[0])  # most-passed / closest upcoming
-        return gap, (f'\u2705 {lbl} hit' if gap <= 0 else f'{_pct(gap)} to {lbl}')
+        return gap, (f'✅ {lbl} hit' if gap <= 0 else f'{_pct(gap)} to {lbl}')
 
     entries = []
-    for _, r in monitor.iterrows():
-        if is_core(r['Sleeve']):
+    for _, row in monitor.iterrows():
+        if is_core(row['Sleeve']):
             continue
-        shares = r.get('Shares')
-        price = r.get('Price')
-        if _isna(shares) or float(shares) <= 0 or _isna(price) or float(price) <= 0:
+        shares = _positive(row.get('Shares'))
+        price = _positive(row.get('Price'))
+        if shares is None or price is None:
             continue
-        a = lookup.get(str(r['Ticker']), {})
-        plus2r = r_multiple_price(a.get('Entry'), a.get('Stop'), 2.0)
-        ext = extended_price(r.get('EMA20'), settings)
+        plan = lookup.get(str(row['Ticker']), {})
+        plus2r = r_multiple_price(plan.get('Entry'), plan.get('Stop'), 2.0)
+        ext = extended_price(row.get('EMA20'), settings)
         if plus2r is None and ext is None:
             continue
-        price = float(price)
-        shares = float(shares)
-        rank = harvested.get(scaleout_key(r.get('Account'), str(r['Ticker'])), 0)
+        rank = harvested.get(scaleout_key(row.get('Account'), str(row['Ticker'])), 0)
         p2_taken = rank >= SCALE_2R
         ex_taken = rank >= SCALE_EXTENDED
         # Case B: +2R harvested but the extended rung sits *above* it -> the lower-
@@ -598,11 +611,11 @@ def _scaleout_section(
         )
         p2_price, p2_sell = _level_cell(price, shares, plus2r, p2_taken)
         ex_price, ex_sell = _level_cell(price, shares, ext, ex_taken, folded=ex_folded)
-        row = [str(r['Ticker'])]
+        cells = [str(row['Ticker'])]
         if show_acct:
-            row.append(_text(r.get('Account')))
-        row += [nearest_txt, _num(shares, 3), p2_price, p2_sell, ex_price, ex_sell]
-        entries.append((sort_gap, row))
+            cells.append(_text(row.get('Account')))
+        cells += [nearest_txt, _num(shares, 3), p2_price, p2_sell, ex_price, ex_sell]
+        entries.append((sort_gap, cells))
     if not entries:
         return ''
     entries.sort(key=lambda kv: kv[0])  # nearest (or most-passed) first
@@ -610,14 +623,14 @@ def _scaleout_section(
     headers = ['Ticker']
     if show_acct:
         headers.append('Account')
-    headers += ['Nearest', 'Shares', '+2R price', 'Sell \u2153 @ +2R', 'Extended price',
-                'Sell \u2153 @ ext']
+    headers += ['Nearest', 'Shares', '+2R price', 'Sell ⅓ @ +2R', 'Extended price',
+                'Sell ⅓ @ ext']
     note = _escape_dollars(
-        '\n\n_Swing scale-out ladder, ordered by proximity to the next level (\u2705 = '
-        'reached, act now). Sell \u2153 of the position when price reaches **+2R** (twice your '
-        'initial risk above entry) and another \u2153 once it runs **extended** '
+        '\n\n_Swing scale-out ladder, ordered by proximity to the next level (✅ = '
+        'reached, act now). Sell ⅓ of the position when price reaches **+2R** (twice your '
+        'initial risk above entry) and another ⅓ once it runs **extended** '
         f'({_pct(settings.swing_extended_atr)} above the 20-day EMA). Trail the remainder; '
-        'sell the final \u2153 at the **Target**. \u201cfolded \u2014 +2R taken\u201d marks an '
+        'sell the final ⅓ at the **Target**. “folded — +2R taken” marks an '
         'extended rung skipped because +2R (a higher-priority milestone) was already harvested '
         'at a lower price. Levels are estimates from current entry/stop and the 20-EMA._'
     )
@@ -643,44 +656,42 @@ def _stops_section(
     history = history or {}
     show_acct = has_accounts(monitor)
     entries = []
-    for _, r in monitor.iterrows():
-        if is_core(r['Sleeve']):
+    for _, row in monitor.iterrows():
+        if is_core(row['Sleeve']):
             continue
-        a = lookup.get(str(r['Ticker']), {})
-        price = r.get('Price')
-        stop = a.get('Stop')
-        shares = r.get('Shares')
-        if _isna(price) or float(price) <= 0 or _isna(stop) or _isna(shares) or float(shares) <= 0:
+        plan = lookup.get(str(row['Ticker']), {})
+        price = _positive(row.get('Price'))
+        shares = _positive(row.get('Shares'))
+        stop = plan.get('Stop')
+        if price is None or shares is None or _isna(stop):
             continue
-        price = float(price)
-        stop_f = float(stop)
-        shares_f = float(shares)
-        pnl = r.get('Unreal P&L %')
-        risk_pct = (price - stop_f) / price
+        stop = float(stop)
+        pnl = row.get('Unreal P&L %')
+        risk_pct = (price - stop) / price
         cost = price / (1 + float(pnl)) if not _isna(pnl) and float(pnl) > -1 else None
         up_one_r = not _isna(pnl) and risk_pct > 0 and float(pnl) >= risk_pct
-        trail = chandelier_trail(history.get(str(r['Ticker'])), cost, settings)
-        if price <= stop_f:
-            alert, note = stop_f, 'Sell now \u2014 stop hit'
+        trail = chandelier_trail(history.get(str(row['Ticker'])), cost, settings)
+        if price <= stop:
+            alert, note = stop, 'Sell now — stop hit'
         else:
             # Trail up: take the highest protective level that still sits below
             # price. The Chandelier trail only ever raises the alert (it is a
             # ratcheting stop); when it sits above price it is ignored here so a
             # fixed-lookback breach never fires a false "sell now" that would
             # contradict the present-state action on a normal pullback.
-            alert, note = stop_f, 'Alert at structural stop'
+            alert, note = stop, 'Alert at structural stop'
             if up_one_r and cost is not None and cost > alert and cost < price:
                 alert, note = cost, 'Tighten to breakeven (cost)'
             if trail is not None and trail > alert and trail < price:
-                alert, note = trail, 'Trail \u2014 Chandelier stop'
+                alert, note = trail, 'Trail — Chandelier stop'
         gap = (alert - price) / price
-        at_risk = shares_f * (price - alert) if price > alert else 0.0
-        row = [str(r['Ticker'])]
+        at_risk = shares * (price - alert) if price > alert else 0.0
+        cells = [str(row['Ticker'])]
         if show_acct:
-            row.append(_text(r.get('Account')))
-        row += [_num(shares_f, 3), _money(price), _money(alert), _pct(gap),
-                _money(at_risk), note]
-        entries.append((gap, row))
+            cells.append(_text(row.get('Account')))
+        cells += [_num(shares, 3), _money(price), _money(alert), _pct(gap),
+                  _money(at_risk), note]
+        entries.append((gap, cells))
     if not entries:
         return ''
     entries.sort(key=lambda kv: kv[0])  # closest to triggering (or already through) first
@@ -691,11 +702,11 @@ def _stops_section(
     headers += ['Shares', 'Price', 'Alert at', '% to alert', '$ at risk', 'Next step']
     note = _escape_dollars(
         '\n\n_Set a **price alert** at each **Alert at** level (fractional shares '
-        'can\u2019t hold resting stop orders); when it fires, sell the position manually. The '
+        'can’t hold resting stop orders); when it fires, sell the position manually. The '
         'alert starts at the structural stop, steps up to your **cost (breakeven)** once a '
         'name is up more than its stop distance, then **trails** under a Chandelier stop '
-        f'(highest high \u2212 {_num(settings.trail_atr_mult)}\u00d7ATR) as the trade runs '
-        '\u2014 always raise it, never lower. **$ at risk** is what you give back from here if '
+        f'(highest high − {_num(settings.trail_atr_mult)}×ATR) as the trade runs '
+        '— always raise it, never lower. **$ at risk** is what you give back from here if '
         'the alert triggers; **% to alert** is the cushion before it does (negative = price '
         'still above the alert; 0 = triggering; positive = already through it)._'
     )
@@ -710,24 +721,24 @@ def _watchlist_section(
     headers = ['Ticker', 'Price', 'Setup', 'Conf', 'Entry', 'Stop', 'Target',
                'R/R', 'Max add (risk)', 'Suggested add', 'Action']
     rows = []
-    for _, r in watch_monitor.iterrows():
-        ticker = str(r['Ticker'])
-        a = lookup.get(ticker, {})
-        actionable = bool(a.get('Actionable', False))
-        sizing = add_sizing(account_value, settings, a, 0.0, open_risk_pct, cash_available=cash)
-        add_txt = _num(sizing.shares, 3) if sizing and sizing.shares > 0 else '\u2014'
+    for _, row in watch_monitor.iterrows():
+        ticker = str(row['Ticker'])
+        plan = lookup.get(ticker, {})
+        actionable = bool(plan.get('Actionable', False))
+        sizing = add_sizing(account_value, settings, plan, 0.0, open_risk_pct, cash_available=cash)
+        add_txt = _num(sizing.shares, 3) if sizing and sizing.shares > 0 else DASH
         sugg = suggested_add(sizing, settings)
-        sugg_txt = _num(sugg[0], 3) if sugg else '\u2014'
-        action = 'Buy candidate \u2014 setup live' if actionable else 'Watch \u2014 no setup yet'
+        sugg_txt = _num(sugg[0], 3) if sugg else DASH
+        action = 'Buy candidate — setup live' if actionable else 'Watch — no setup yet'
         rows.append([
             ticker,
-            _money(r.get('Price')),
-            _text(a.get('Setup')),
-            _int(a.get('Confidence')),
-            _money(a.get('Entry')),
-            _money(a.get('Stop')),
-            _money(a.get('Target')),
-            _num(a.get('R/R')),
+            _money(row.get('Price')),
+            _text(plan.get('Setup')),
+            _int(plan.get('Confidence')),
+            _money(plan.get('Entry')),
+            _money(plan.get('Stop')),
+            _money(plan.get('Target')),
+            _num(plan.get('R/R')),
             add_txt,
             sugg_txt,
             action,
@@ -762,35 +773,35 @@ def _recommendations_section(
     headers = ['Ticker', 'Company', 'Setup', 'Type', 'Conf', 'R/R',
                'Entry', 'Stop', 'Target', 'Rank', 'Max add (risk)', 'Suggested add', 'Add $']
     rows = []
-    for _, r in recs.iterrows():
-        ticker = str(r['Ticker'])
+    for _, row in recs.iterrows():
+        ticker = str(row['Ticker'])
         sizing = add_sizing(
-            account_value, settings, r.to_dict(),
+            account_value, settings, row.to_dict(),
             current_value=current_values.get(ticker, 0.0), open_risk_pct=open_risk_pct,
             cash_available=cash,
         )
         sugg = suggested_add(sizing, settings)
         rows.append([
             ticker,
-            _text(r.get('Company Name')),
-            _text(r.get('Setup')),
+            _text(row.get('Company Name')),
+            _text(row.get('Setup')),
             'ETF' if ticker in etfs else 'Stock',
-            _int(r.get('Confidence')),
-            _num(r.get('R/R')),
-            _money(r.get('Entry')),
-            _money(r.get('Stop')),
-            _money(r.get('Target')),
-            _num(r.get('Rank Score')),
-            _num(sizing.shares, 3) if sizing else '\u2014',
-            _num(sugg[0], 3) if sugg else '\u2014',
-            _money(sugg[1]) if sugg else '\u2014',
+            _int(row.get('Confidence')),
+            _num(row.get('R/R')),
+            _money(row.get('Entry')),
+            _money(row.get('Stop')),
+            _money(row.get('Target')),
+            _num(row.get('Rank Score')),
+            _num(sizing.shares, 3) if sizing else DASH,
+            _num(sugg[0], 3) if sugg else DASH,
+            _money(sugg[1]) if sugg else DASH,
         ])
     note = ''
     if cash is not None:
         note = _escape_dollars(
             f'\n\n_Add sizes are capped to your {_money(max(cash, 0.0))} cash on hand; '
             'amounts are per-name, so you cannot take every add at once. **Add $** is the '
-            'starter tranche (Suggested add \u00d7 price)._'
+            'starter tranche (Suggested add × price)._'
         )
     return '## Recommended adds\n\n' + _md_table(headers, rows) + note
 
@@ -800,9 +811,9 @@ def _company_names(analysis: pd.DataFrame | None) -> dict[str, str]:
     names: dict[str, str] = {}
     if analysis is None or analysis.empty or 'Company Name' not in analysis.columns:
         return names
-    for _, r in analysis.iterrows():
-        ticker = str(r['Ticker'])
-        label = r.get('Company Name')
+    for _, row in analysis.iterrows():
+        ticker = str(row['Ticker'])
+        label = row.get('Company Name')
         if label and not _isna(label):
             names[ticker] = str(label)
     return names
@@ -823,9 +834,9 @@ def _build_exposure(
     fund_tickers = {t for t in held_tickers if t in etfs}
     fund_holdings = client.fetch_fund_holdings(sorted(fund_tickers))
     holdings = [
-        (str(r['Ticker']), float(r['Value']))
-        for _, r in monitor.iterrows()
-        if not _isna(r.get('Value'))
+        (str(row['Ticker']), float(row['Value']))
+        for _, row in monitor.iterrows()
+        if not _isna(row.get('Value'))
     ]
     name_lookup = _company_names(analysis)
     exposures, tail_value = look_through_exposure(
@@ -844,9 +855,9 @@ def _exposure_section(
     lines = [
         '## Look-through exposure',
         '',
-        '_True economic exposure: direct holdings combined with each fund\u2019s top-10 '
+        '_True economic exposure: direct holdings combined with each fund’s top-10 '
         'holdings (Yahoo). The untracked remainder of broad funds is grouped as '
-        '\u201cOther / diversified\u201d rather than attributed to any name._',
+        '“Other / diversified” rather than attributed to any name._',
         '',
     ]
     headers = ['Symbol', 'Name', 'Direct', 'Via funds', 'Total', '% acct']
@@ -855,8 +866,8 @@ def _exposure_section(
         rows.append([
             e.symbol,
             _text(e.name),
-            _money(e.direct_value) if e.direct_value else '\u2014',
-            _money(e.fund_value) if e.fund_value else '\u2014',
+            _money(e.direct_value) if e.direct_value else DASH,
+            _money(e.fund_value) if e.fund_value else DASH,
             _money(e.total_value),
             _pct(e.weight),
         ])
@@ -896,8 +907,8 @@ def _concentration_section(
         for label, sub in account_groups(monitor):
             held = sub['Value'].dropna()
             pnl = sub['Unreal P&L $'].dropna()
-            value = _money(float(held.sum())) if not held.empty else '\u2014'
-            pnl_txt = _money(float(pnl.sum())) if not pnl.empty else '\u2014'
+            value = _money(float(held.sum())) if not held.empty else DASH
+            pnl_txt = _money(float(pnl.sum())) if not pnl.empty else DASH
             lines.append(_escape_dollars(
                 f'- {label}: {len(sub)} position(s), value {value}, P&L {pnl_txt}'
             ))
@@ -912,16 +923,16 @@ def _concentration_section(
             + ['Trend', 'RS', 'Weight %', 'Value', 'Unreal P&L %']
         )
         rows = [
-            [str(r['Ticker'])]
-            + ([_text(r.get('Account'))] if has_acct else [])
+            [str(row['Ticker'])]
+            + ([_text(row.get('Account'))] if has_acct else [])
             + [
-                _pct(r.get('Trend')),
-                _pct(r.get('RS')),
-                _pct(r.get('Weight %')),
-                _money(r.get('Value')),
-                _pct(r.get('Unreal P&L %')),
+                _pct(row.get('Trend')),
+                _pct(row.get('RS')),
+                _pct(row.get('Weight %')),
+                _money(row.get('Value')),
+                _pct(row.get('Unreal P&L %')),
             ]
-            for _, r in rotation.iterrows()
+            for _, row in rotation.iterrows()
         ]
         lines.append(_md_table(headers, rows))
     return '\n'.join(lines)
@@ -951,18 +962,18 @@ def _build_report(
     exposures, tail_value = exposure
     _, open_risk_pct = portfolio_open_risk(monitor, lookup, account_value)
     held_values = {
-        str(r['Ticker']): float(r['Value'])
-        for _, r in monitor.iterrows()
-        if not _isna(r.get('Value'))
+        str(row['Ticker']): float(row['Value'])
+        for _, row in monitor.iterrows()
+        if not _isna(row.get('Value'))
     }
     # Sum the full monitor (not the ticker-keyed dict, which collapses a ticker
     # held in two accounts) so cash matches account_value - holdings exactly.
     total_held = float(monitor['Value'].dropna().sum())
     cash = max(account_value - total_held, 0.0)
-    regime_dot = '\U0001f7e2' if risk_on else '\U0001f534'
+    regime_dot = STATUS_GREEN if risk_on else STATUS_RED
     sections = [
         f'# Daily Position Report\n\n{regime_dot} **{"Risk-On" if risk_on else "Risk-Off"}** '
-        f'\u00b7 _Generated {generated_at} \u00b7 Market context: {context}_',
+        f'· _Generated {generated_at} · Market context: {context}_',
         _snapshot_section(monitor, lookup, etfs, account_value, settings),
         _action_plan_section(
             monitor, watch_monitor, lookup, recs, account_value, settings, risk_on, open_risk_pct,
@@ -997,16 +1008,16 @@ def _income_section(income: list[IncomeEvent] | None) -> str:
         '## Income to reconcile',
         '',
         '_Distributions with ex-dates since your last report. Add each total to '
-        'the matching `cash` line in positions.txt (estimates \u2014 confirm against '
+        'the matching `cash` line in positions.txt (estimates — confirm against '
         'your broker)._',
     ]
     for account, total, events in income_by_account(income):
         detail = '; '.join(
-            f'{e.ticker} {e.kind.lower()} {_money(e.per_share)}/sh \u00d7 {_num(e.shares, 3)} = '
+            f'{e.ticker} {e.kind.lower()} {_money(e.per_share)}/sh × {_num(e.shares, 3)} = '
             f'{_money(e.amount)} ({e.ex_date.strftime("%b %d")})'
             for e in events
         )
-        lines.append(f'- **{_text(account)}** \u2014 add \u2248 {_money(total)}: {detail}')
+        lines.append(f'- **{_text(account)}** — add ≈ {_money(total)}: {detail}')
     return '\n'.join(lines)
 
 
@@ -1068,14 +1079,14 @@ def _scaleout_state(
     """
     lookup = analysis_lookup(analysis)
     records = []
-    for _, r in monitor.iterrows():
-        if is_core(r['Sleeve']):
+    for _, row in monitor.iterrows():
+        if is_core(row['Sleeve']):
             continue
-        ticker = str(r['Ticker'])
-        a = lookup.get(ticker, {})
-        key = scaleout_key(r.get('Account'), ticker)
-        shares = float(r.get('Shares') or 0.0)
-        records.append((key, shares, active_scale_rank(r, a, settings)))
+        ticker = str(row['Ticker'])
+        plan = lookup.get(ticker, {})
+        key = scaleout_key(row.get('Account'), ticker)
+        shares = float(row.get('Shares') or 0.0)
+        records.append((key, shares, active_scale_rank(row, plan, settings)))
     ledger = load_scaleout_ledger(SCALEOUT_LEDGER_PATH)
     harvested, ledger = update_scaleout_ledger(
         records, ledger, first_seen_harvested=_sold_keys(positions_text)
@@ -1086,8 +1097,8 @@ def _scaleout_state(
 
 def _generate_report(client, engine, cache, settings: Settings, generated_at: str) -> tuple[str, str]:
     """Assemble the report markdown plus a one-line status; pure of file writes."""
-    positions_text = _read(POSITIONS_FILE)
-    merged = merge_holdings(parse_portfolio(_read(PORTFOLIO_FILE)), parse_positions(positions_text))
+    positions_text = read_text_or_empty(POSITIONS_FILE)
+    merged = merge_holdings(parse_portfolio(read_text_or_empty(PORTFOLIO_FILE)), parse_positions(positions_text))
     if not merged:
         return (
             _build_unavailable(generated_at, 'no holdings in portfolio.txt/positions.txt'),

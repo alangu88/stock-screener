@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import StringIO
+from pathlib import Path
 
 import pandas as pd
 import requests
@@ -30,6 +31,31 @@ class UniverseResult:
 
 def normalize_ticker(symbol: str) -> str:
     return symbol.replace('.', '-').strip().upper()
+
+
+def watchlist_tickers(path: Path) -> list[str]:
+    """Read plain ticker symbols (one per line, ``#`` comments) from ``path``."""
+    if not path.exists():
+        return []
+    out: list[str] = []
+    for line in path.read_text(encoding='utf-8').splitlines():
+        line = line.split('#', 1)[0].strip()
+        if line:
+            out.append(line.upper())
+    return out
+
+
+def resolve_universe(
+    name: str, cache: SQLiteCache, watchlist_path: Path, max_tickers: int
+) -> list[str]:
+    """Return tickers for a named universe (``'sp500'`` or a watchlist file)."""
+    if name == 'sp500':
+        tickers = list(load_sp500_universe(cache).tickers)
+    else:
+        tickers = watchlist_tickers(watchlist_path)
+    if max_tickers > 0:
+        tickers = tickers[:max_tickers]
+    return tickers
 
 
 def load_sp500_universe(cache: SQLiteCache, force_refresh: bool = False) -> UniverseResult:

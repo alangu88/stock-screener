@@ -209,18 +209,31 @@ class YahooFinanceClient:
 
         return output
 
-    def fetch_fundamentals(
-        self, tickers: list[str], force_refresh: bool = False
-    ) -> dict[str, Fundamentals]:
-        output: dict[str, Fundamentals] = {}
+    def _fetch_missing_parallel(
+        self,
+        tickers: list[str],
+        cache_key: Callable[[str], str],
+        from_cache: Callable[[Any], Any | None],
+        fetch_one: Callable[[str], Any | None],
+        force_refresh: bool,
+    ) -> dict[str, Any]:
+        """Serve cache hits, then fetch the misses across a thread pool.
 
-        unique_tickers = sorted(set(tickers))
+        ``fetch_one`` performs one Yahoo round-trip for a single ticker and owns
+        its own cache write, so each fetcher keeps its own positive/negative
+        cache policy. Concurrency is bounded by ``fundamentals_max_workers`` --
+        the shared limit for all per-ticker Yahoo ``.info`` / ``.calendar`` /
+        ``.top_holdings`` lookups.
+        """
+        output: dict[str, Any] = {}
         to_fetch: list[str] = []
-        for ticker in unique_tickers:
+        for ticker in sorted(set(tickers)):
             if not force_refresh:
-                cached = self.cache.get(f'fundamentals:{ticker}')
+                cached = self.cache.get(cache_key(ticker))
                 if cached is not None:
-                    output[ticker] = Fundamentals(**cached)
+                    result = from_cache(cached)
+                    if result is not None:
+                        output[ticker] = result
                     continue
             to_fetch.append(ticker)
 
@@ -229,13 +242,22 @@ class YahooFinanceClient:
 
         workers = max(1, min(self.settings.fundamentals_max_workers, len(to_fetch)))
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            results = executor.map(self._fetch_one_fundamental, to_fetch)
-
-        for entry in results:
-            if entry is not None:
-                output[entry.ticker] = entry
-
+            results = executor.map(fetch_one, to_fetch)
+        for ticker, result in zip(to_fetch, results, strict=True):
+            if result is not None:
+                output[ticker] = result
         return output
+
+    def fetch_fundamentals(
+        self, tickers: list[str], force_refresh: bool = False
+    ) -> dict[str, Fundamentals]:
+        return self._fetch_missing_parallel(
+            tickers,
+            cache_key=lambda t: f'fundamentals:{t}',
+            from_cache=lambda cached: Fundamentals(**cached),
+            fetch_one=self._fetch_one_fundamental,
+            force_refresh=force_refresh,
+        )
 
     def _fetch_one_fundamental(self, ticker: str) -> Fundamentals | None:
         try:
@@ -263,22 +285,25 @@ class YahooFinanceClient:
 
     def fetch_earnings_dates(self, tickers: list[str], force_refresh: bool = False) -> dict[str, str]:
         """Next earnings date (string) per ticker; best-effort, cached, missing skipped."""
-        output: dict[str, str] = {}
-        for ticker in sorted(set(tickers)):
-            cache_key = f'earnings:{ticker}'
-            if not force_refresh:
-                cached = self.cache.get(cache_key)
-                if cached is not None:
-                    if cached.get('date'):
-                        output[ticker] = cached['date']
-                    continue
-            date = self._fetch_one_earnings(ticker)
-            self.cache.set(cache_key, {'date': date}, ttl_seconds=self.settings.cache_ttl_hours * 3600)
-            if date:
-                output[ticker] = date
-        return output
+        return self._fetch_missing_parallel(
+            tickers,
+            cache_key=lambda t: f'earnings:{t}',
+            from_cache=lambda cached: cached.get('date') or None,
+            fetch_one=self._fetch_one_earnings,
+            force_refresh=force_refresh,
+        )
 
     def _fetch_one_earnings(self, ticker: str) -> str | None:
+        date = self._resolve_earnings_date(ticker)
+        # Negative-cache misses too, so names with no upcoming date are not re-hit
+        # every run; a transient fetch failure caches None and simply retries next TTL.
+        self.cache.set(
+            f'earnings:{ticker}', {'date': date},
+            ttl_seconds=self.settings.cache_ttl_hours * 3600,
+        )
+        return date
+
+    def _resolve_earnings_date(self, ticker: str) -> str | None:
         try:
             cal = self._with_retry(
                 lambda t=ticker: yf.Ticker(t).calendar,
@@ -321,21 +346,13 @@ class YahooFinanceClient:
         self, tickers: list[str], force_refresh: bool = False
     ) -> dict[str, FundHoldings]:
         """Top-holdings look-through for each fund ticker (cached)."""
-        output: dict[str, FundHoldings] = {}
-        for ticker in sorted(set(tickers)):
-            cache_key = f'fund_holdings:{ticker}'
-            if not force_refresh:
-                cached = self.cache.get(cache_key)
-                if cached is not None:
-                    output[ticker] = FundHoldings(**cached)
-                    continue
-            entry = self._fetch_one_fund_holdings(ticker)
-            if entry is not None and entry.holdings:
-                output[ticker] = entry
-                self.cache.set(
-                    cache_key, entry.__dict__, ttl_seconds=self.settings.cache_ttl_hours * 3600
-                )
-        return output
+        return self._fetch_missing_parallel(
+            tickers,
+            cache_key=lambda t: f'fund_holdings:{t}',
+            from_cache=lambda cached: FundHoldings(**cached),
+            fetch_one=self._fetch_one_fund_holdings,
+            force_refresh=force_refresh,
+        )
 
     def _fetch_one_fund_holdings(self, ticker: str) -> FundHoldings | None:
         try:
@@ -364,12 +381,17 @@ class YahooFinanceClient:
 
         if not holdings:
             return None
-        return FundHoldings(
+        entry = FundHoldings(
             ticker=ticker,
             holdings=holdings,
             names=names,
             top_weight_total=sum(holdings.values()),
         )
+        self.cache.set(
+            f'fund_holdings:{ticker}', entry.__dict__,
+            ttl_seconds=self.settings.cache_ttl_hours * 3600,
+        )
+        return entry
 
 
 def _coerce_number(value) -> float | None:

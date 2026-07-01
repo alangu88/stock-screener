@@ -30,13 +30,10 @@ from src.screener.holdings import (  # noqa: E402
     parse_portfolio,
     parse_positions,
 )
+from src.utils.files import read_text_or_empty  # noqa: E402
 
 PORTFOLIO_PATH = _REPO_ROOT / 'portfolio.txt'
 POSITIONS_PATH = _REPO_ROOT / 'positions.txt'
-
-
-def _read(path: Path) -> str:
-    return path.read_text(encoding='utf-8') if path.exists() else ''
 
 
 def _leading_header(text: str) -> str:
@@ -56,12 +53,12 @@ def _leading_header(text: str) -> str:
 
 
 def main() -> int:
-    positions_text = _read(POSITIONS_PATH)
+    positions_text = read_text_or_empty(POSITIONS_PATH)
     if not positions_text.strip():
         print(f'No positions found at {POSITIONS_PATH.name}; nothing to sync.', file=sys.stderr)
         return 1
 
-    portfolio_text = _read(PORTFOLIO_PATH)
+    portfolio_text = read_text_or_empty(PORTFOLIO_PATH)
     merged = merge_holdings(
         parse_portfolio(portfolio_text),
         parse_positions(positions_text),

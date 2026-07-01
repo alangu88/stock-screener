@@ -318,8 +318,8 @@ capped by the per-name weight limit. Every add shows a risk-based **Max add**
 (the ceiling) alongside a **Suggested add** starter tranche — by default half
 the max (`SCREENER_SUGGESTED_ADD_FRACTION`, `0 < f <= 1`) — entered now, with the
 remainder added once the trade is up **+1R** (`SCREENER_SUGGESTED_ADD_TRIGGER_R`)
-and the stop moved to breakeven. Backtesting (`scripts/backtest_scalein.py`)
-found this staged entry roughly halves drawdown versus committing full size at
+and the stop moved to breakeven. Backtesting found this staged entry roughly
+halves drawdown versus committing full size at
 once, while adding earlier (+0.5R) or never completing the add both underperform.
 Core allocation targets **60–70%**
 (`SCREENER_CORE_ALLOCATION_MIN` / `_MAX`), and the app flags when you exceed the
@@ -340,7 +340,7 @@ is up more than its stop distance, then **trails** under a present-state
 floored at cost once far enough ahead) as the trade runs — always raised, never
 lowered. The trail depends only on recent price action and your cost basis (no
 entry date or entry-setup label), and the table shows the **$ at risk** you'd
-give back if the alert triggers. A portfolio backtest (`scripts/backtest_portfolio.py --exit be-chandelier`)
+give back if the alert triggers. A portfolio backtest
 found a breakeven-then-Chandelier trail compounds materially better than holding
 to the structural stop — it frees capital faster so more setups compound — at
 comparable drawdown.
@@ -381,7 +381,7 @@ available variables. The most commonly adjusted values:
 | `SCREENER_CACHE_TTL_HOURS` | `24` | Cache freshness window |
 | `SCREENER_MAX_RETRIES` | `4` | Yahoo request retry attempts |
 | `SCREENER_REQUEST_DELAY_SECONDS` | `0.25` | Throttle between requests |
-| `SCREENER_FUNDAMENTALS_MAX_WORKERS` | `8` | Fundamentals fetch concurrency |
+| `SCREENER_FUNDAMENTALS_MAX_WORKERS` | `8` | Concurrency for per-ticker Yahoo lookups (fundamentals, earnings, fund holdings) |
 | `SCREENER_FUNDAMENTALS_TTL_HOURS` | `24` | Separate (longer) cache for slow-moving fundamentals; keep high to lower `CACHE_TTL_HOURS` for fresher prices without a fundamentals re-fetch storm |
 | `SCREENER_MIN_AVG_VOLUME` | `500000` | Liquidity gate |
 | `SCREENER_SMA_SHORT_WINDOW` / `SCREENER_SMA_LONG_WINDOW` | `50` / `200` | Trend MAs |
@@ -400,9 +400,13 @@ snapshot variables.
 ## Development
 
 ```bash
-ruff check .     # lint
-pytest           # run the test suite
+ruff check .                             # lint
+mypy                                     # static type check
+pytest --cov=src --cov-report=term-missing   # tests + coverage
 ```
+
+CI (`.github/workflows/ci.yml`) runs the same lint, type-check, and test steps
+on Python 3.11, 3.12, and 3.13 for every push and pull request.
 
 ## Error Handling and Rate Limits
 
