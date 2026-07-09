@@ -43,19 +43,19 @@ def blended_outperformance(
     return float(score / total_weight)
 
 
-def rs_line_at_high(
-    stock_close: pd.Series, benchmark_close: pd.Series, window: int, tolerance: float = 0.0
-) -> bool:
-    """True when the stock/benchmark ratio line is at (or near) a window high.
+def beta(stock_close: pd.Series, benchmark_close: pd.Series, lookback: int = 252) -> float:
+    """CAPM beta: slope of the stock's daily returns regressed on the benchmark's.
 
-    A relative-strength line making new highs is one of the earliest tells of
-    institutional leadership and often precedes price breakouts.
+    Uses up to ``lookback`` overlapping daily returns. Returns 1.0 (market beta)
+    when there is too little overlapping history to estimate it.
     """
     aligned = pd.concat([stock_close, benchmark_close], axis=1, join='inner').dropna()
-    if len(aligned) < 2:
-        return False
-    ratio = aligned.iloc[:, 0] / aligned.iloc[:, 1]
-    window_high = ratio.rolling(window=window, min_periods=1).max().iloc[-1]
-    if window_high == 0:
-        return False
-    return bool(ratio.iloc[-1] >= window_high * (1 - tolerance))
+    stock_ret = aligned.iloc[:, 0].pct_change()
+    bench_ret = aligned.iloc[:, 1].pct_change()
+    paired = pd.concat([stock_ret, bench_ret], axis=1).dropna().tail(lookback)
+    if len(paired) < 30:
+        return 1.0
+    bench_var = float(paired.iloc[:, 1].var())
+    if bench_var == 0:
+        return 1.0
+    return float(paired.iloc[:, 0].cov(paired.iloc[:, 1]) / bench_var)

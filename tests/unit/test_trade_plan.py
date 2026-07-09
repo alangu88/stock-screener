@@ -1,6 +1,6 @@
 import pytest
 
-from src.screener.setups import AVOID, BREAKOUT, CONTRACTION, Setup
+from src.screener.setups import AVOID, BREAKOUT, PULLBACK, Setup
 from src.screener.strategy import StrategyConfig
 from src.screener.trade_plan import NO_PLAN, build_trade_plan, management_plan
 from tests.unit._features_factory import make_features
@@ -18,32 +18,46 @@ def test_breakout_plan_is_asymmetric_and_immediate():
     )
     plan = build_trade_plan(features, _setup(BREAKOUT), CONFIG)
     assert plan.immediate_entry is True
-    assert plan.entry == 102.0
+    # Entry is anchored to the breakout level (pivot), not the live tick, so the
+    # plan and its reward/risk stay stable as price moves intraday.
+    assert plan.entry == 100.0
     # Stop sits a quarter-ATR below the tight contraction low, not the deep base.
     assert plan.stop == pytest.approx(98.0 - CONFIG.stop_buffer_atr * 1.0)
-    # Target projects the full structural measured move (base height).
-    assert plan.target == pytest.approx(102.0 + (104.0 - 90.0))
+    # Target projects the full structural measured move (base height) from entry.
+    assert plan.target == pytest.approx(100.0 + (104.0 - 90.0))
     assert plan.stop < plan.entry < plan.target
     assert plan.reward_risk >= CONFIG.min_reward_risk
 
 
-def test_contraction_entry_is_a_buy_stop_at_the_pivot():
+def test_breakout_entry_is_stable_as_price_moves_intraday():
+    # Same structure, two different live prices within the valid breakout band.
+    base = dict(pivot=100.0, pivot_low=98.0, base_high=104.0, base_low=90.0, atr=1.0)
+    early = build_trade_plan(make_features(price=101.0, **base), _setup(BREAKOUT), CONFIG)
+    later = build_trade_plan(make_features(price=104.0, **base), _setup(BREAKOUT), CONFIG)
+    # Entry/stop/target/RR are identical because they anchor to structure, not price.
+    assert early.entry == later.entry == 100.0
+    assert early.stop == later.stop
+    assert early.target == later.target
+    assert early.reward_risk == later.reward_risk
+
+
+def test_pullback_entry_anchors_to_support_not_price():
+    # Price is tagging the EMA/MA; entry anchors to the nearest support at/below.
     features = make_features(
-        price=96.0, pivot=100.0, pivot_low=95.0, base_high=104.0, base_low=92.0, atr=1.0
+        price=102.0, ema_trend=100.0, ma_fast=99.0, pivot=110.0,
+        base_high=108.0, base_low=95.0, atr=1.0,
     )
-    plan = build_trade_plan(features, _setup(CONTRACTION), CONFIG)
-    assert plan.immediate_entry is False
-    assert plan.entry == 100.0  # does not chase the current price
-    assert plan.entry > features.price
+    plan = build_trade_plan(features, _setup(PULLBACK), CONFIG)
+    assert plan.entry == 100.0  # the higher rising support at/below price
+    assert plan.stop < plan.entry < plan.target
 
 
 def test_risk_is_capped_at_max_risk_pct():
     # A very deep structure low would imply huge risk; the cap tightens the stop.
-    # Uses a contraction so the breakout ATR tightening does not mask the cap.
     features = make_features(
         price=100.0, pivot=100.0, pivot_low=50.0, base_high=120.0, base_low=40.0, atr=1.0
     )
-    plan = build_trade_plan(features, _setup(CONTRACTION), CONFIG)
+    plan = build_trade_plan(features, _setup(BREAKOUT), CONFIG)
     assert plan.stop == 100.0 * (1 - CONFIG.max_risk_pct)
 
 

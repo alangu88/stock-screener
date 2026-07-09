@@ -16,8 +16,7 @@ from src.export.markdown_export import (
     results_to_markdown,
     watchlist_to_markdown,
 )
-from src.screener.portfolio import PortfolioConfig, assign_portfolio
-from src.screener.setups import BREAKOUT, CONTRACTION, PULLBACK
+from src.screener.setups import BREAKOUT, PULLBACK
 
 
 def _row(ticker, setup, confidence, risk, market_cap, trend, rank, rr=2.0):
@@ -41,11 +40,11 @@ def _row(ticker, setup, confidence, risk, market_cap, trend, rank, rr=2.0):
 def _frame():
     rows = [
         _row('AAA', PULLBACK, 88, 0.04, 1.2e12, 0.95, 90.0),
-        _row('BBB', CONTRACTION, 80, 0.03, 4e11, 0.85, 80.0),
+        _row('BBB', PULLBACK, 80, 0.03, 4e11, 0.85, 80.0),
         _row('CCC', PULLBACK, 72, 0.05, 9e10, 0.70, 70.0),
         _row('DDD', BREAKOUT, 60, 0.08, 6e9, 0.40, 55.0),
     ]
-    return assign_portfolio(pd.DataFrame(rows), PortfolioConfig())
+    return pd.DataFrame(rows)
 
 
 def _watch_frame():

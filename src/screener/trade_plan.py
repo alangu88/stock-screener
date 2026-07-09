@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.analysis.features import MarketFeatures
-from src.screener.setups import BREAKOUT, CONTRACTION, PULLBACK, Setup
+from src.screener.setups import BREAKOUT, PULLBACK, Setup
 from src.screener.strategy import StrategyConfig
 
 
@@ -81,9 +81,7 @@ def management_plan(features: MarketFeatures, config: StrategyConfig) -> TradePl
     if target <= price:
         target = price + config.min_reward_risk * (price - stop)
 
-    risk_pct = (price - stop) / price
-    reward_pct = (target - price) / price
-    reward_risk = reward_pct / risk_pct if risk_pct > 0 else None
+    risk_pct, reward_pct, reward_risk = _risk_reward(price, stop, target)
     return TradePlan(
         entry=price,
         stop=stop,
@@ -96,26 +94,32 @@ def management_plan(features: MarketFeatures, config: StrategyConfig) -> TradePl
 
 
 def _breakout_levels(f: MarketFeatures, config: StrategyConfig):
-    entry = f.price  # confirmed breakout -> immediate entry is justified
+    # Anchor the entry to the breakout level (the pivot), not the live tick, so
+    # the plan and its reward/risk stay stable intraday. A valid breakout has
+    # already cleared the pivot (and is not yet 'extended'), so the pivot is the
+    # structural trigger the trade is defined against.
+    entry = f.pivot
     target = entry + _measured_move(f)
     return entry, f.pivot_low, target, True
 
 
-def _contraction_levels(f: MarketFeatures, config: StrategyConfig):
-    entry = f.pivot  # buy-stop above the coil; do not chase the current price
-    target = entry + _measured_move(f)
-    return entry, f.pivot_low, target, False
-
-
 def _pullback_levels(f: MarketFeatures, config: StrategyConfig):
-    entry = f.price  # tagging rising support
+    # Anchor the entry to the rising support being tagged (the nearest MA/EMA at
+    # or below price), not the live tick, so the buy-the-dip plan and its
+    # reward/risk stay stable intraday instead of wobbling with every print.
+    entry = _pullback_support(f)
     target = max(f.pivot, f.base_high) + _measured_move(f)
     return entry, f.base_low, target, True
 
 
+def _pullback_support(f: MarketFeatures) -> float:
+    """Nearest rising support (EMA/fast MA) at or below price; price as fallback."""
+    supports = [s for s in (f.ema_trend, f.ma_fast) if s and s <= f.price]
+    return max(supports) if supports else f.price
+
+
 _BUILDERS = {
     BREAKOUT: _breakout_levels,
-    CONTRACTION: _contraction_levels,
     PULLBACK: _pullback_levels,
 }
 
@@ -132,12 +136,22 @@ def _stop_from_structure(entry: float, structure_low: float, atr: float, config:
     return max(structure_stop, risk_floor)
 
 
-def _finalize(entry: float, stop: float, target: float, immediate: bool) -> TradePlan:
-    if entry <= 0 or stop >= entry or target <= entry:
-        return NO_PLAN
+def _risk_reward(entry: float, stop: float, target: float) -> tuple[float, float, float | None]:
+    """Return ``(risk_pct, reward_pct, reward_risk)`` for a plan, anchored on ``entry``.
+
+    ``reward_risk`` is ``None`` when risk is non-positive (a degenerate plan the
+    callers reject or guard against).
+    """
     risk_pct = (entry - stop) / entry
     reward_pct = (target - entry) / entry
     reward_risk = reward_pct / risk_pct if risk_pct > 0 else None
+    return risk_pct, reward_pct, reward_risk
+
+
+def _finalize(entry: float, stop: float, target: float, immediate: bool) -> TradePlan:
+    if entry <= 0 or stop >= entry or target <= entry:
+        return NO_PLAN
+    risk_pct, reward_pct, reward_risk = _risk_reward(entry, stop, target)
     return TradePlan(
         entry=entry,
         stop=stop,

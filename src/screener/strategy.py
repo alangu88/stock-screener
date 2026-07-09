@@ -2,21 +2,23 @@
 
 Every threshold used by feature engineering, setup detection, trade planning,
 and ranking lives here so the methodology is tunable in one place and the
-calculations stay deterministic. Values are derived from principles common to
-trend-following and leadership-momentum playbooks (O'Neil, Minervini,
-Weinstein, Wyckoff, Darvas, Turtle trend following) rather than copied from any
-single arbitrary rulebook.
+calculations stay deterministic. The live model is volume-primary (MA trend +
+Donchian channel + volume confirmation); the thresholds below feed both that
+model and the shared feature layer.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.config import Settings
+from src.config import SIGNAL_MODEL_MA_DC_VOLUME_REGIME, Settings
 
 
 @dataclass(frozen=True)
 class StrategyConfig:
+    # --- Signal-model feature flag ------------------------------------------
+    signal_model: str = SIGNAL_MODEL_MA_DC_VOLUME_REGIME
+
     # --- Moving-average trend structure (Weinstein stage / Minervini template) -
     ma_fast: int = 50
     ma_mid: int = 150
@@ -32,23 +34,20 @@ class StrategyConfig:
     # --- Relative strength (CAN SLIM RS rating idea) ------------------------
     rs_lookbacks: tuple[int, ...] = (21, 63, 126)
     rs_weights: tuple[float, ...] = (0.5, 0.3, 0.2)
-    rs_line_window: int = 126
 
     # --- Breakout / base structure (Darvas box, O'Neil pivot) ---------------
     breakout_window: int = 50
     base_window: int = 30
-    pivot_proximity: float = 0.06  # coiled within 6% under the pivot
     extended_threshold: float = 0.05  # > 5% past the pivot is chasing
-    recent_high_window: int = 10  # short-term trigger for reversals
+    recent_high_window: int = 10  # short-term high/low window for pivot & stop refs
 
     # --- Pullback (trend continuation) --------------------------------------
     pullback_tolerance: float = 0.04  # within 4% of the rising MA
 
-    # --- Volatility contraction (VCP) ---------------------------------------
+    # --- Volatility (short/long ATR) ----------------------------------------
     atr_period: int = 14
     short_atr_period: int = 10
     long_atr_period: int = 50
-    contraction_ratio: float = 0.85  # short ATR / long ATR below this = drying up
 
     # --- Volume / accumulation (Wyckoff effort-vs-result) -------------------
     volume_window: int = 50
@@ -58,50 +57,22 @@ class StrategyConfig:
     # --- Risk: stops & targets ----------------------------------------------
     atr_stop_mult: float = 2.0
     stop_buffer_atr: float = 0.25  # cushion below structure to avoid noise
-    # Asymmetric-payoff floor. Lowered from 2.0 to 1.5 so volatility contractions
-    # (structural R/R ~1.8, the strongest realized edge in backtests) are no
-    # longer silently filtered out, while still demanding favorable asymmetry.
+    # Asymmetric-payoff floor. Set to 1.5 (not 2.0) so structurally sound setups
+    # with R/R ~1.8 are not silently filtered out, while still demanding
+    # favorable asymmetry.
     min_reward_risk: float = 1.5
     max_risk_pct: float = 0.12  # capital-preservation cap on per-trade risk
-
-    # --- Confidence weights (must sum to 1) ---------------------------------
-    weight_trend: float = 0.22
-    weight_rs: float = 0.24
-    weight_setup: float = 0.16
-    weight_volume: float = 0.14
-    weight_contraction: float = 0.12
-    weight_reward: float = 0.12
-
-    # --- Screening gates -----------------------------------------------------
-    min_confidence: float = 45.0
-    min_avg_volume: int = 500_000
-
-    def __post_init__(self) -> None:
-        total = sum(self.confidence_weights.values())
-        if abs(total - 1.0) > 1e-6:
-            raise ValueError(f'confidence weights must sum to 1, got {total:.4f}')
 
     @classmethod
     def from_settings(cls, settings: Settings) -> StrategyConfig:
         # Only data/liquidity windows track Settings; the remaining thresholds are
         # fixed methodology (tune them here, not via env) to keep backtests stable.
         return cls(
+            signal_model=settings.signal_model,
             ma_fast=settings.sma_short_window,
             ma_long=settings.sma_long_window,
             ema_trend=settings.ema_window,
             volume_window=settings.volume_window,
             atr_period=settings.atr_period,
             atr_stop_mult=settings.atr_stop_multiplier,
-            min_avg_volume=settings.min_avg_volume,
         )
-
-    @property
-    def confidence_weights(self) -> dict[str, float]:
-        return {
-            'trend': self.weight_trend,
-            'rs': self.weight_rs,
-            'setup': self.weight_setup,
-            'volume': self.weight_volume,
-            'contraction': self.weight_contraction,
-            'reward': self.weight_reward,
-        }

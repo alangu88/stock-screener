@@ -5,6 +5,7 @@ from src.screener.ranking import (
     assess_market_context,
     composite_rank,
     confidence_score,
+    regime_suppresses_entry,
 )
 from src.screener.setups import AVOID, BREAKOUT, Setup
 from src.screener.strategy import StrategyConfig
@@ -62,3 +63,15 @@ def test_market_context_detects_downtrend():
     context = assess_market_context(falling, CONFIG)
     assert context.label == 'Risk-Off'
     assert context.score < 0.4
+
+
+def test_regime_suppresses_only_riskoff_breakouts_for_regime_model():
+    regime = 'ma_dc_volume_regime'
+    # Risk-off breakout -> suppressed for the regime-aware model.
+    assert regime_suppresses_entry(regime, False, BREAKOUT) is True
+    # Risk-off pullback stays (still positive EV).
+    assert regime_suppresses_entry(regime, False, 'Pullback') is False
+    # Risk-on breakout stays (that is where the edge lives).
+    assert regime_suppresses_entry(regime, True, BREAKOUT) is False
+    # Base model and unknown models never suppress.
+    assert regime_suppresses_entry('ma_dc_volume', False, BREAKOUT) is False

@@ -48,7 +48,7 @@ def render_chart_section(
 
     ticker = free_text.strip().upper() or (picked or '')
     if not ticker:
-        st.info('Enter a ticker, or analyze your positions to populate the dropdown.')
+        st.info('Enter a ticker, or run the screen to populate the dropdown.')
         return
 
     plan_row = _plan_row(engine, ticker)
@@ -66,23 +66,24 @@ def render_chart_section(
 
 
 def _ticker_options() -> list[str]:
-    """Union of held, watchlist, and recommended tickers (in that order)."""
+    """Tickers from the latest screen results plus the watchlist file."""
+    from src.ui.files import watchlist_tickers
+
     tickers: list[str] = []
-    for key in ('monitor_df', 'watch_monitor', 'recommendations'):
-        df = st.session_state.get(key)
-        if isinstance(df, pd.DataFrame) and 'Ticker' in df.columns:
-            tickers.extend(df['Ticker'].astype(str).tolist())
+    df = st.session_state.get('screen_results')
+    if isinstance(df, pd.DataFrame) and 'Ticker' in df.columns:
+        tickers.extend(df['Ticker'].astype(str).tolist())
+    tickers.extend(watchlist_tickers())
     return list(dict.fromkeys(t for t in tickers if t))
 
 
 def _plan_row(engine: ScreenerEngine, ticker: str) -> dict | None:
     """Reuse a cached plan row if available, else analyze the ticker on demand."""
-    for key in ('positions_analysis', 'recommendations'):
-        df = st.session_state.get(key)
-        if isinstance(df, pd.DataFrame) and not df.empty and 'Ticker' in df.columns:
-            match = df[df['Ticker'].astype(str) == ticker]
-            if not match.empty:
-                return match.iloc[0].to_dict()
+    df = st.session_state.get('screen_results')
+    if isinstance(df, pd.DataFrame) and not df.empty and 'Ticker' in df.columns:
+        match = df[df['Ticker'].astype(str) == ticker]
+        if not match.empty:
+            return match.iloc[0].to_dict()
     universe = UniverseResult(tickers=[ticker], companies={})
     analysis = engine.analyze(universe, config=FilterConfig())
     if analysis is None or analysis.empty:

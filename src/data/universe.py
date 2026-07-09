@@ -12,6 +12,7 @@ from src.utils.errors import UniverseLoadError
 
 SP500_WIKI_URL = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
 SP500_FALLBACK_CSV_URL = 'https://datahub.io/core/s-and-p-500-companies/r/constituents.csv'
+SP400_WIKI_URL = 'https://en.wikipedia.org/wiki/List_of_S%26P_400_companies'
 REQUEST_HEADERS = {
     'User-Agent': (
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -20,6 +21,7 @@ REQUEST_HEADERS = {
     )
 }
 CACHE_KEY = 'sp500_universe_v1'
+SP400_CACHE_KEY = 'sp400_universe_v1'
 CACHE_TTL_SECONDS = 7 * 24 * 3600
 
 
@@ -48,9 +50,13 @@ def watchlist_tickers(path: Path) -> list[str]:
 def resolve_universe(
     name: str, cache: SQLiteCache, watchlist_path: Path, max_tickers: int
 ) -> list[str]:
-    """Return tickers for a named universe (``'sp500'`` or a watchlist file)."""
+    """Return tickers for a named universe (``'sp500'``/``'sp400'``/``'sp900'`` or a watchlist)."""
     if name == 'sp500':
         tickers = list(load_sp500_universe(cache).tickers)
+    elif name == 'sp400':
+        tickers = list(load_sp400_universe(cache).tickers)
+    elif name == 'sp900':
+        tickers = list(load_sp900_universe(cache).tickers)
     else:
         tickers = watchlist_tickers(watchlist_path)
     if max_tickers > 0:
@@ -79,28 +85,58 @@ def load_sp500_universe(cache: SQLiteCache, force_refresh: bool = False) -> Univ
     raise UniverseLoadError('Unable to load S&P 500 universe. ' + ' | '.join(errors))
 
 
-def _store_universe(cache: SQLiteCache, symbols: list[str], names: list[str]) -> UniverseResult:
+def _store_universe(
+    cache: SQLiteCache, symbols: list[str], names: list[str], key: str = CACHE_KEY
+) -> UniverseResult:
     if len(symbols) != len(names):
         raise UniverseLoadError(
             f'Symbol/name length mismatch: {len(symbols)} symbols vs {len(names)} names'
         )
     tickers = [normalize_ticker(s) for s in symbols]
     companies = {normalize_ticker(s): n for s, n in zip(symbols, names, strict=True)}
-    cache.set(CACHE_KEY, {'tickers': tickers, 'companies': companies}, ttl_seconds=CACHE_TTL_SECONDS)
+    cache.set(key, {'tickers': tickers, 'companies': companies}, ttl_seconds=CACHE_TTL_SECONDS)
     return UniverseResult(tickers=tickers, companies=companies)
 
 
-def _load_from_wikipedia() -> tuple[list[str], list[str]]:
-    response = requests.get(SP500_WIKI_URL, headers=REQUEST_HEADERS, timeout=20)
+def load_sp400_universe(cache: SQLiteCache, force_refresh: bool = False) -> UniverseResult:
+    """S&P 400 MidCap constituents (Wikipedia; same table layout as the S&P 500)."""
+    if not force_refresh:
+        cached = cache.get(SP400_CACHE_KEY)
+        if cached is not None:
+            return UniverseResult(tickers=cached['tickers'], companies=cached['companies'])
+    try:
+        symbols, names = _load_wikipedia_constituents(SP400_WIKI_URL)
+    except (requests.RequestException, ValueError, KeyError, UniverseLoadError) as exc:  # pragma: no cover - network path
+        raise UniverseLoadError(f'Unable to load S&P 400 universe: {exc}') from exc
+    return _store_universe(cache, symbols, names, SP400_CACHE_KEY)
+
+
+def load_sp900_universe(cache: SQLiteCache, force_refresh: bool = False) -> UniverseResult:
+    """S&P 900 = S&P 500 (large cap) + S&P 400 (mid cap), deduplicated.
+
+    A natural liquid, no-small-cap universe: the mid-cap floor keeps out the true
+    small caps while broadening beyond the mega-cap S&P 500.
+    """
+    large = load_sp500_universe(cache, force_refresh=force_refresh)
+    mid = load_sp400_universe(cache, force_refresh=force_refresh)
+    tickers = list(dict.fromkeys([*large.tickers, *mid.tickers]))
+    companies = {**mid.companies, **large.companies}
+    return UniverseResult(tickers=tickers, companies=companies)
+
+
+def _load_wikipedia_constituents(url: str) -> tuple[list[str], list[str]]:
+    """Fetch (symbols, names) from a Wikipedia index-constituents page (table 0)."""
+    response = requests.get(url, headers=REQUEST_HEADERS, timeout=20)
     response.raise_for_status()
     tables = pd.read_html(StringIO(response.text))
     if not tables:
         raise UniverseLoadError('No tables found in Wikipedia HTML')
-
     df = tables[0]
-    symbols = df['Symbol'].astype(str).tolist()
-    names = df['Security'].astype(str).tolist()
-    return symbols, names
+    return df['Symbol'].astype(str).tolist(), df['Security'].astype(str).tolist()
+
+
+def _load_from_wikipedia() -> tuple[list[str], list[str]]:
+    return _load_wikipedia_constituents(SP500_WIKI_URL)
 
 
 def _load_from_fallback_csv() -> tuple[list[str], list[str]]:

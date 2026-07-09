@@ -44,6 +44,9 @@ jobs:
           # the universe if Yahoo throttling becomes a problem.
           SCREENER_SNAPSHOT_SYMBOLS: '0'
           SCREENER_SNAPSHOT_LIMIT: '20'
+          # Pin the entry model explicitly. Default is the regime-aware volume
+          # model; set to 'ma_dc_volume' to drop the risk-off regime rule.
+          SCREENER_SIGNAL_MODEL: 'ma_dc_volume_regime'
         run: python scripts/generate_snapshot.py
 
       - name: Commit updated README

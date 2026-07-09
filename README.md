@@ -7,8 +7,8 @@
 
 A trader-style stock screener for the S&P 500, built with Python and Streamlit
 on free Yahoo Finance data. Instead of listing indicator matches, it identifies
-actionable trade setups, builds defined-risk trade plans, ranks them by quality,
-and organizes survivors into a Core / Satellite portfolio.
+actionable trade setups, builds defined-risk structural trade plans, and ranks
+them by quality adjusted for the market regime.
 
 > **Research and educational use only. Not investment advice.** See
 > [Disclaimer](#disclaimer).
@@ -19,47 +19,30 @@ and organizes survivors into a Core / Satellite portfolio.
 > Generated on demand via the **Daily Screen** workflow or `python scripts/generate_snapshot.py`. Mechanical, research-only.
 
 <!-- SCREENER:START -->
-![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-25-blue) ![Adds](https://img.shields.io/badge/adds-1-success)
+![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-10-blue) ![Adds](https://img.shields.io/badge/adds-0-success)
 
-_Last updated: 2026-07-01 00:30 UTC_
+_Last updated: 2026-07-09 19:34 UTC_
 
-> **Parameters:** Risk/trade 1% · Core band 60%–70% · Add gates conf ≥ 80 & R/R ≥ 2.5 · Max 10 single-stock names · Max position 10%
+> **Parameters:** Signal model ma_dc_volume_regime · Gates conf ≥ 80 & R/R ≥ 2.5 · Min avg volume 500,000
 
-#### Watchlist (your holdings + followed names)
+#### Watchlist (followed names)
 
-| Ticker | Setup | Confidence | R/R | Entry | Stop | Target | Rank Score | Actionable |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| CGNX | Breakout | 82 | 1.71 | 72.42 | 63.73 | 87.24 | 82.50 | Yes |
-| COHR | Pullback | 77 | 3.07 | 398.00 | 350.24 | 544.52 | 76.70 | Yes |
-| FSELX | Pullback | 70 | 2.36 | 69.05 | 61.00 | 88.06 | 70.00 | No |
-| VTI | Pullback | 63 | 1.91 | 368.20 | 355.12 | 393.12 | 62.90 | Yes |
-| VXUS | Pullback | 56 | 3.01 | 85.16 | 81.88 | 95.02 | 55.90 | Yes |
-| AVGO | Avoid | 0 | 7.04 | 375.93 | 356.81 | 510.47 | 0.00 | No |
-| AMZN | Avoid | 0 | 5.62 | 239.57 | 230.81 | 288.77 | 0.00 | No |
-| AAPL | Avoid | 0 | 3.31 | 284.94 | 271.77 | 328.59 | 0.00 | No |
-| AMD | Avoid | 0 | 2.68 | 550.82 | 486.98 | 722.22 | 0.00 | No |
-| GOOGL | Avoid | 0 | 3.28 | 351.16 | 327.28 | 429.57 | 0.00 | No |
-| DELL | Avoid | 0 | 4.85 | 421.38 | 371.44 | 663.58 | 0.00 | No |
-| LLY | Avoid | 0 | 1.81 | 1,213.19 | 1,070.06 | 1,472.32 | 0.00 | No |
-| LRCX | Avoid | 0 | 3.31 | 432.93 | 380.98 | 604.73 | 0.00 | No |
-| MU | Avoid | 0 | 4.38 | 1,147.95 | 1,010.20 | 1,750.74 | 0.00 | No |
-| NFLX | Avoid | 0 | 6.55 | 73.42 | 70.28 | 94.04 | 0.00 | No |
-| META | Avoid | 0 | 5.16 | 555.63 | 535.69 | 658.45 | 0.00 | No |
-| MSFT | Avoid | 0 | 4.59 | 371.43 | 345.92 | 488.55 | 0.00 | No |
-| NVDA | Avoid | 0 | 5.07 | 197.46 | 189.08 | 239.94 | 0.00 | No |
-| NOW | Avoid | 0 | 4.84 | 98.17 | 87.88 | 147.97 | 0.00 | No |
-| PLTR | Avoid | 0 | 5.28 | 115.68 | 104.82 | 173.01 | 0.00 | No |
-| ROK | Avoid | 0 | 1.99 | 488.05 | 452.36 | 559.20 | 0.00 | No |
-| TSLA | Avoid | 0 | 7.34 | 411.64 | 401.15 | 488.64 | 0.00 | No |
-| SNDK | Avoid | 0 | 4.19 | 2,143.05 | 1,885.88 | 3,220.11 | 0.00 | No |
-| TSM | Avoid | 0 | 1.87 | 463.64 | 414.57 | 555.38 | 0.00 | No |
-| XOM | Avoid | 0 | 23.76 | 135.77 | 134.57 | 164.50 | 0.00 | No |
+| Ticker | Setup | Confidence | R/R | Entry | Stop | Target | Rank Score | Beta | ATR % | Dist 200D % | Return 3M | Div Yield | Dollar ADV | Sector | Actionable |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| AAPL | Avoid | 0 | 2.09 | 315.72 | 294.79 | 359.37 | 0.00 | 0.85 | 2.63% | 16.01% | 21.95% | 0.33% | 17,929,723,911 | Technology | No |
+| AMZN | Avoid | 0 | 3.38 | 245.85 | 231.31 | 295.05 | 0.00 | 1.42 | 3.13% | 5.41% | 11.12% | 0.00% | 12,566,723,988 | Consumer Cyclical | No |
+| BABA | Avoid | 0 | 3.14 | 111.61 | 98.22 | 153.71 | 0.00 | 1.24 | 3.56% | -23.50% | -10.94% | 6.65% | 1,426,555,085 | Consumer Cyclical | No |
+| CRWV | Avoid | 0 | 4.72 | 93.00 | 81.84 | 145.69 | 0.00 | 2.89 | 8.74% | -6.54% | 4.61% | 0.00% | 2,751,222,227 | Technology | No |
+| GOOGL | Avoid | 0 | 2.06 | 358.34 | 327.43 | 422.02 | 0.00 | 1.34 | 3.09% | 12.55% | 12.93% | 0.23% | 11,995,190,781 | Communication Services | No |
+| META | Avoid | 0 | 3.14 | 627.09 | 594.31 | 729.91 | 0.00 | 1.46 | 3.89% | -2.50% | 2.40% | 0.35% | 11,474,859,532 | Communication Services | No |
+| MSFT | Avoid | 0 | 3.17 | 383.17 | 346.20 | 500.29 | 0.00 | 0.78 | 3.13% | -13.49% | 2.36% | 0.93% | 15,756,868,158 | Technology | No |
+| NVDA | Avoid | 0 | 3.04 | 203.78 | 189.78 | 246.26 | 0.00 | 1.83 | 3.44% | 6.39% | 11.92% | 0.02% | 32,800,399,345 | Technology | No |
+| ORCL | Avoid | 0 | 12.17 | 144.50 | 135.24 | 257.20 | 0.00 | 1.80 | 6.39% | -26.52% | 0.59% | - | 4,029,947,168 | nan | No |
+| TSLA | Avoid | 0 | 1.83 | 405.86 | 363.75 | 482.86 | 0.00 | 2.13 | 4.78% | -2.97% | 18.24% | 0.00% | 20,057,595,264 | Consumer Cyclical | No |
 
-#### Recommended adds (clear the gates)
+#### Recommended adds (clear the screen gates)
 
-| Ticker | Setup | Sleeve | Entry | Stop | Target | R/R | Confidence | Rank Score | Position Size % |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| STX | Pullback | Core | 971.91 | 855.29 | 1,594.86 | 5.34 | 84 | 84.00 | 10.00% |
+_No candidates cleared the recommendation gates — sitting tight._
 
 > Mechanical signals for research only — not trade recommendations.
 <!-- SCREENER:END -->
@@ -70,18 +53,16 @@ _Last updated: 2026-07-01 00:30 UTC_
 - Market focus: NYSE, NASDAQ, AMEX (filtered via Yahoo exchange metadata)
 - Data source: Yahoo Finance via `yfinance` (free)
 - Behaves like a trader hunting actionable setups, not a list of indicator filters. It:
-    1. Identifies a specific setup (Breakout / Volatility Contraction / Pullback / Avoid)
+    1. Identifies a specific setup (Breakout / Pullback / Avoid)
 	2. Builds a structural trade plan (Entry / Stop / Target) with real reward/risk
 	3. Explains itself (reason, key factors, risks, confidence score)
 	4. Ranks survivors by composite quality adjusted for the market regime
-	5. Splits survivors into a Core / Satellite portfolio with risk-based position sizes
 - Only high-quality candidates survive: an identified setup (never `Avoid`), an
   asymmetric reward/risk, sufficient confidence, and tradable liquidity.
 - Output table columns:
 	- Ticker, Company Name
-	- Setup, Sleeve, Confidence, Core Score, Rank Score
-	- Position Size %
-	- Entry, Stop, Target, Risk %, Risk Contribution %, Reward %, R/R
+	- Setup, Confidence, Rank Score
+	- Entry, Stop, Target, Risk %, Reward %, R/R
 	- Reason, Key Factors, Risks
 	- Trend Score, RS Outperformance, Rel Volume, Market Context
 	- Market Cap, PE Ratio, Revenue Growth, Price
@@ -89,10 +70,8 @@ _Last updated: 2026-07-01 00:30 UTC_
 	- Structural setup detection grounded in trader methodologies
 	- Composite ranking by setup quality, relative strength, and reward/risk
 	- Market-regime adjustment (risk-on amplifies, risk-off damps)
-	- Core / Satellite portfolio construction with risk-parity position sizing
 	- Adjustable screen controls (min confidence, min reward/risk, setup types)
-	- Adjustable portfolio controls (core allocation, core threshold, max weight)
-	- Sortable table, pagination, CSV export
+	- Sortable results table and CSV export
 	- Chart panel with selectable period and overlays:
 		- Price (candlesticks)
 		- EMA 20
@@ -100,54 +79,61 @@ _Last updated: 2026-07-01 00:30 UTC_
 		- SMA 200
 		- RSI (separate pane with 70/30 lines)
 		- Volume
-	- Positions monitor: track your own holdings (any symbol, including ETFs)
-	  against the 20 / 50 / 200 moving averages, with trend and
-	  golden/death-cross flags. Add an entry price and share count to also see
-	  unrealized P&L, position value, and portfolio weight — group holdings by
-	  account (e.g. taxable vs. Roth IRA) for a per-account value and
-	  concentration/risk breakdown, and repeat a ticker per lot to get a
-	  share-weighted average cost basis. Your positions persist in a private,
-	  git-ignored `positions.txt` (copy `positions.example.txt` to start) that
-	  the app auto-loads on launch.
+	- Structural trade-plan overlays (entry / stop / target) on the chart for
+	  any name with a computable setup.
 
 ## Methodology
 
-The screener encodes principles that recur across leadership-momentum and
-trend-following traders (O'Neil, Minervini, Weinstein, Wyckoff, Darvas, the
-Turtles) rather than arbitrary indicator thresholds:
+The screener runs a deliberately lightweight, **volume-primary** model built on
+three signals rather than a large blend of indicators:
 
-- **Trade with the primary trend** — a trend-template score (price vs stacked
-  50/150/200 MAs, rising long-term MA, position within the 52-week range)
-  gates every long setup (Weinstein Stage 2, Minervini trend template).
-- **Demand relative-strength leadership** — blended multi-horizon
-  outperformance vs SPY, plus an RS-line-at-new-highs check (O'Neil RS,
-  Minervini RS line).
-- **Prefer supply drying up** — volatility contraction (short/long ATR) and
-  quiet pullbacks to rising support (Minervini VCP, Wyckoff accumulation,
-  Darvas boxes).
-- **Confirmation over prediction** — breakouts require volume expansion;
-  contractions are anticipatory and trigger only on a buy-stop through the
-  pivot.
+- **Moving-average trend structure** — a setup only fires in a healthy uptrend
+  (price above a rising long MA, fast MA above the long MA). No trend, no trade.
+- **Donchian channel levels** — the actionable level is the N-day channel: a
+  clean breakout of the prior high, or a pullback holding above the long MA
+  while below the channel top.
+- **Volume is the decisive confirmation** — a breakout must arrive on a genuine
+  volume surge *and* net accumulation (up/down volume, OBV); a pullback must be
+  quiet (supply absorbed) yet still show accumulation. Volume failure demotes an
+  otherwise-aligned chart to `Avoid`.
+- **Regime awareness** — breakouts taken while the broad market is risk-off (SPY
+  below its 200-day) were negative-EV in backtests, so the default model
+  suppresses them.
 - **Capital preservation and asymmetry** — stops sit below the structure that
-  invalidates the thesis (with an ATR cushion) and are capped so no single
-  trade risks more than a set fraction of the position. Targets project the
-  base's measured move, so every surviving plan is asymmetric by construction.
+  invalidates the thesis (with an ATR cushion) and are capped so no single trade
+  risks more than a set fraction of the position. Targets project the base's
+  measured move, so every surviving plan is asymmetric by construction.
 - **Market context** — the broad-market regime (SPY vs its 50/200 MAs and
   long-term slope) scales the final rank.
 
 **Why this and not the alternatives?** A pure indicator-filter screen (e.g.
 RSI band + price-above-MA) finds *matches*, not *opportunities*: it ignores
-structure, can't size risk, and floods you with mediocre names. A
-mean-reversion design fights the trend and depends on precise timing. The
-chosen confirmation-based leadership-momentum framework instead favors a small
-number of high-quality, defined-risk setups — quality over quantity.
+structure, can't size risk, and floods you with mediocre names. A large
+multi-signal blend is prone to overfitting and hides which inputs actually
+carry edge. The volume-primary model keeps a small, interpretable signal set —
+trend, channel, volume — that survived survivorship-adjusted, walk-forward
+testing, and pairs it with defined-risk, asymmetric plans — quality over quantity.
 
 **Architecture** mirrors the decision flow, each layer pure and testable:
 `indicators` (primitives) → `features` (calculations, no decisions) → `setups`
 (classification, no prices) → `trade_plan` (entry/stop/target from structure)
-→ `ranking` (confidence + market-context-adjusted composite rank) → `portfolio`
-(Core/Satellite sleeves + risk-based sizing) → `engine` (orchestration). All
-calculations are deterministic.
+→ `ranking` (confidence + market-context-adjusted composite rank) → `engine`
+(orchestration). All calculations are deterministic.
+
+### Signal model (default: `ma_dc_volume_regime`)
+
+The entry engine is selectable via `SCREENER_SIGNAL_MODEL`. The **default is the
+regime-aware volume model**, a deliberately lightweight system built on three
+signals — **moving-average trend structure**, **Donchian channel** levels, and
+**volume as the decisive confirmation** — with one regime rule: **suppress
+breakouts while SPY trades below its 200-day** (edge attribution showed those
+are negative-EV). It led every risk-adjusted metric in survivorship-adjusted,
+walk-forward testing on a large + mid-cap universe, with lower turnover.
+
+| `SCREENER_SIGNAL_MODEL` | Description |
+| --- | --- |
+| `ma_dc_volume_regime` | **Default.** Volume-primary MA + Donchian, risk-off breakouts suppressed. |
+| `ma_dc_volume` | Same, without the regime suppression (ablation). |
 
 ## How to Read the Results Table
 
@@ -159,10 +145,10 @@ opportunities sit at the top. You can re-sort by any column from the sidebar.
 
 | Column | Meaning |
 | --- | --- |
-| **Setup** | The classified opportunity: `Breakout`, `Volatility Contraction`, or `Pullback`. (`Avoid` candidates are filtered out.) |
-| **Confidence** | 0–100 quality score blending trend, relative strength, setup family, volume/accumulation, contraction, and reward/risk. |
+| **Setup** | The classified opportunity: `Breakout` or `Pullback`. (`Avoid` candidates are filtered out.) |
+| **Confidence** | 0–100 quality score blending trend, relative strength, setup family, volume/accumulation, and reward/risk. |
 | **Rank Score** | Confidence scaled by the market regime (`confidence × (0.7 + 0.3 × context)`). |
-| **Entry** | Structural entry — the breakout/pullback price, or a buy-stop at the pivot for a contraction. Not defaulted to the current price unless immediate action is justified. |
+| **Entry** | Structural entry — the breakout or pullback price. Not defaulted to the current price unless immediate action is justified. |
 | **Stop** | Protective stop below the invalidating structure (with an ATR cushion), capped so risk never exceeds the configured maximum. |
 | **Target** | Profit objective from the base's measured move. |
 | **Risk %** | `(Entry − Stop) / Entry`. |
@@ -178,35 +164,9 @@ opportunities sit at the top. You can re-sort by any column from the sidebar.
 ### Setup types
 
 - **Breakout** — Price cleared a base pivot in a leading uptrend, confirmed by volume expansion. Momentum continuation.
-- **Volatility Contraction** — Supply is drying up (short/long ATR contracting) while price coils just below a pivot. Anticipatory; triggers on a buy-stop through the pivot.
 - **Pullback** — Established uptrend that dipped to rising support (20 EMA / 50 MA) on quiet volume while still leading SPY. Buy-the-dip continuation. (Backtesting's strongest, most statistically significant edge.)
 
 > **Reversal** setups were removed: backtesting showed negative expectancy (a high hit rate but an inverted ~0.85 reward/risk), so counter-trend conditions are now treated as `Avoid`.
-
-### Portfolio columns (Core / Satellite)
-
-After screening, survivors are organized into a classic **core-satellite**
-portfolio so the table reads as an allocation plan, not just a watchlist:
-
-- **Sleeve** — `Core` (durable trend-continuation leaders: pullbacks /
-  contractions in larger, trending names — backtesting's strongest edge) or
-  `Satellite` (higher-octane tactical plays, mostly breakouts / smaller names).
-- **Core Score** — 0–1 *core-ness* blend of setup family (40%), confidence
-  (20%), market-cap/liquidity on a log scale (20%), and trend persistence
-  (20%). At or above the threshold (default 0.60) a name joins the Core sleeve.
-- **Position Size %** — suggested weight as a share of the whole book. Capital
-  is split by the **core allocation** (default 70% Core / 30% Satellite), then
-  within each sleeve positions are sized by **risk parity** — equal risk budget
-  per name (inverse of the entry-to-stop distance), tilted by confidence — and
-  capped per name (default 10%). If a sleeve has too few names to deploy its
-  allocation under the cap, the remainder is implicitly held as cash.
-- **Risk Contribution %** — capital actually at risk in that name
-  (`Position Size % × Risk %`); summed per sleeve it is the *portfolio heat*.
-
-A per-sleeve summary panel above the table rolls up positions, allocation,
-portfolio heat, and average quality for Core, Satellite, and the total book.
-All portfolio controls live in the sidebar and the columns are included in the
-CSV export.
 
 ### Context columns
 
@@ -250,14 +210,12 @@ stock-screener/
 │   │   ├── setups.py              # setup classification
 │   │   ├── trade_plan.py          # entry/stop/target from structure
 │   │   ├── ranking.py             # confidence + composite rank
-│   │   ├── portfolio.py           # Core/Satellite + risk-parity sizing
-│   │   ├── holdings.py            # positions parsing + MA/P&L monitor
 │   │   ├── result.py              # result schema
 │   │   └── engine.py              # pipeline orchestration
 │   └── utils/
 │       ├── errors.py
 │       ├── logger.py
-│       └── numeric.py             # shared clamp/is_nan helpers
+│       └── numeric.py             # shared clamp helper
 ├── tests/
 │   ├── integration/
 │   └── unit/
@@ -281,92 +239,31 @@ For development (tests + linting), install the dev extras instead:
 pip install -r requirements-dev.txt
 ```
 
-## Position Management & Daily Report
+## Usage
 
-The app doubles as a personal position-management tool built around a
-privacy-preserving two-file model:
+The screener has two surfaces, both driven by the same pipeline:
 
-| File | Committed? | Contents |
-| --- | --- | --- |
-| `portfolio.txt` | Yes | Composition only — `[Account]` sections with `TICKER, core|satellite` lines. No sizes. |
-| `positions.txt` | **No** (git-ignored) | Private sizes — `[Account]` sections with `TICKER, cost_basis, shares` lines, plus a `cash = NNNN` directive per account (or a single `account_value = NNNNN`). Copy `positions.example.txt` to start. |
-| `watchlist.txt` | Yes | Tickers you follow but do not hold. |
-| `reports/daily_report.md` | **No** (git-ignored) | Latest generated report (overwritten each run). |
+**Interactive app** — `streamlit run src/app.py`. Set the screen gates in the
+sidebar (min confidence, min reward/risk, setup types), run the screen over the
+S&P 500 plus your watchlist, and chart any name with its structural
+entry / stop / target overlaid.
 
-The app **merges** the two files at runtime: sleeve and membership come from the
-committed `portfolio.txt`, while share counts and cost basis stay in the private
-`positions.txt`, so your real sizes never get committed. The **Publish
-composition** button regenerates `portfolio.txt` from your current holdings
-(tickers + sleeve only). Add a `cash = NNNN` line per `[Account]` for free cash
-(e.g. SPAXX); the totals are summed and your **account value = current holdings +
-cash**, which keeps buy sizing capped to what you can actually spend. As an
-alternative, set a single `account_value` total directly; it supports
-`+`-separated sums, e.g. `account_value = 2310.60 + 5269.23`, and cash is then
-inferred as account value minus holdings.
+**Headless snapshot** — `python scripts/generate_snapshot.py` screens the S&P
+500 (plus your watchlist) and writes a Markdown block into the README between the
+`SCREENER:START` / `SCREENER:END` markers. This is what the scheduled **Daily
+Screen** workflow runs. `SCREENER_SNAPSHOT_SYMBOLS=30` caps the universe for a
+quick run; `0` (default) screens the entire S&P 500.
 
-The daily report (`scripts/daily_report.py`) adds an **Income to reconcile**
-digest: dividends and fund capital-gains distributions are read from the
-(already batched) price history at no extra request cost, multiplied by your
-held shares, and grouped per account so you can top up the right `cash` line.
-A git-ignored watermark (`reports/.income_ledger.json`) surfaces each ex-date
-exactly once; `SCREENER_DIVIDEND_LOOKBACK_DAYS` (default 7) bounds the first run.
-Estimates are informational — your broker's cash remains the source of truth, so
-nothing is credited automatically.
+### Watchlist
 
-Position sizing uses **1% account risk per trade** (`SCREENER_RISK_PER_TRADE`),
-capped by the per-name weight limit. Every add shows a risk-based **Max add**
-(the ceiling) alongside a **Suggested add** starter tranche — by default half
-the max (`SCREENER_SUGGESTED_ADD_FRACTION`, `0 < f <= 1`) — entered now, with the
-remainder added once the trade is up **+1R** (`SCREENER_SUGGESTED_ADD_TRIGGER_R`)
-and the stop moved to breakeven. Backtesting found this staged entry roughly
-halves drawdown versus committing full size at
-once, while adding earlier (+0.5R) or never completing the add both underperform.
-Core allocation targets **60–70%**
-(`SCREENER_CORE_ALLOCATION_MIN` / `_MAX`), and the app flags when you exceed the
-**individual-stock cap** (`SCREENER_MAX_INDIVIDUAL_STOCKS`, ETFs excluded).
-Recommended Adds uses tight gates by default (confidence ≥ 75, R/R ≥ 2.5).
+`watchlist.txt` (committed) is an optional list of extra tickers to screen and
+chart alongside the S&P 500 — one ticker per line, `#` for comments. It carries
+no positions, sizes, or cost basis; it is purely a list of candidates.
 
-New adds are also **paused in a risk-off regime** — when SPY trades below its
-long (200-day) moving average — because backtests show entries taken below the
-200-day roughly halve expectancy. Set `SCREENER_REQUIRE_REGIME_FOR_ADDS=false`
-to keep surfacing adds regardless of regime (held positions are unaffected either
-way and still show their plans).
-
-The **Stops & alerts** section gives each satellite a single price-alert level
-to set at Fidelity (fractional lots can't hold resting stop orders). The alert
-starts at the structural stop, steps up to your **cost (breakeven)** once a name
-is up more than its stop distance, then **trails** under a present-state
-**Chandelier stop** (highest high over `SCREENER_TRAIL_LOOKBACK_BARS` − `SCREENER_TRAIL_ATR_MULT`×ATR,
-floored at cost once far enough ahead) as the trade runs — always raised, never
-lowered. The trail depends only on recent price action and your cost basis (no
-entry date or entry-setup label), and the table shows the **$ at risk** you'd
-give back if the alert triggers. A portfolio backtest
-found a breakeven-then-Chandelier trail compounds materially better than holding
-to the structural stop — it frees capital faster so more setups compound — at
-comparable drawdown.
-
-### Daily report
-
-Generate a local Markdown snapshot (positions status, add sizes, recommended
-adds, allocation, risk, and concentration) without launching the app:
-
-```bash
-python scripts/daily_report.py
-```
-
-It writes a single file, `reports/daily_report.md`, **overwritten on every run**
-(no history is kept). Network failures are caught and turned into an
-"unavailable" notice rather than crashing.
-
-To run it automatically each day, schedule it with **Windows Task Scheduler**
-(Create Basic Task → Daily → Start a program):
-
-- Program/script: `C:\path\to\stock-screener\.venv\Scripts\python.exe`
-- Arguments: `scripts\daily_report.py`
-- Start in: `C:\path\to\stock-screener`
-
-On macOS/Linux, use a `cron` entry such as
-`0 7 * * * cd /path/to/stock-screener && .venv/bin/python scripts/daily_report.py`.
+Recommendations are **suppressed in a risk-off regime** — when SPY trades below
+its long (200-day) moving average — because backtests show entries taken below
+the 200-day roughly halve expectancy. Set `SCREENER_REQUIRE_REGIME_FOR_ADDS=false`
+to keep surfacing candidates regardless of regime.
 
 ## Configuration
 
@@ -387,12 +284,9 @@ available variables. The most commonly adjusted values:
 | `SCREENER_SMA_SHORT_WINDOW` / `SCREENER_SMA_LONG_WINDOW` | `50` / `200` | Trend MAs |
 | `SCREENER_EMA_WINDOW` | `20` | Fast EMA |
 | `SCREENER_ATR_PERIOD` / `SCREENER_ATR_STOP_MULTIPLIER` | `14` / `2.0` | Volatility + stop cushion |
-| `SCREENER_TRAIL_ATR_MULT` / `SCREENER_TRAIL_LOOKBACK_BARS` | `3.0` / `22` | Present-state Chandelier trailing stop (highest high over the lookback − ATR×mult) |
-| `SCREENER_TRAIL_BREAKEVEN_R` | `1.0` | Trail-widths above cost before the trail floors at breakeven |
-| `SCREENER_CORE_ALLOCATION` | `0.70` | Core sleeve share of capital |
-| `SCREENER_CORE_SCORE_THRESHOLD` | `0.60` | Core vs Satellite cutoff |
-| `SCREENER_MAX_POSITION_WEIGHT` | `0.10` | Per-name position cap |
-| `SCREENER_WATCHLIST_AUTO_CONFIDENCE` | `80` | Recommended adds at/above this confidence auto-join `watchlist.txt` |
+| `SCREENER_REC_MIN_CONFIDENCE` / `SCREENER_REC_MIN_REWARD_RISK` | `80` / `2.5` | Recommendation gates (min confidence, min reward:risk) |
+| `SCREENER_REQUIRE_REGIME_FOR_ADDS` | `true` | Suppress recommendations while SPY is risk-off (below its 200-day) |
+| `SCREENER_SIGNAL_MODEL` | `ma_dc_volume_regime` | Entry model: `ma_dc_volume_regime` (default) or `ma_dc_volume`. See [Signal model](#signal-model-default-ma_dc_volume_regime). |
 
 See [`.env.example`](.env.example) for the complete list, including the daily
 snapshot variables.

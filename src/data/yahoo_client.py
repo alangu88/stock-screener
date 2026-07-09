@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
@@ -35,16 +35,21 @@ class Fundamentals:
     revenue_growth: float | None
     exchange: str | None
     quote_type: str | None = None
+    dividend_yield: float | None = None  # fraction (0.02 = 2%)
+    sector: str | None = None
 
 
-@dataclass
-class FundHoldings:
-    """Top holdings of a fund (Yahoo exposes only the top ~10)."""
+def _dividend_yield(info: dict[str, Any]) -> float | None:
+    """Dividend yield as a fraction (0.02 = 2%).
 
-    ticker: str
-    holdings: dict[str, float] = field(default_factory=dict)
-    names: dict[str, str] = field(default_factory=dict)
-    top_weight_total: float = 0.0
+    Yahoo's ``trailingAnnualDividendYield`` is already a fraction; the legacy
+    ``dividendYield`` field is a percent number, so scale it down as a fallback.
+    """
+    frac = _coerce_number(info.get('trailingAnnualDividendYield'))
+    if frac is not None:
+        return frac
+    pct = _coerce_number(info.get('dividendYield'))
+    return pct / 100.0 if pct is not None else None
 
 
 class YahooFinanceClient:
@@ -222,8 +227,7 @@ class YahooFinanceClient:
         ``fetch_one`` performs one Yahoo round-trip for a single ticker and owns
         its own cache write, so each fetcher keeps its own positive/negative
         cache policy. Concurrency is bounded by ``fundamentals_max_workers`` --
-        the shared limit for all per-ticker Yahoo ``.info`` / ``.calendar`` /
-        ``.top_holdings`` lookups.
+        the shared limit for all per-ticker Yahoo ``.info`` lookups.
         """
         output: dict[str, Any] = {}
         to_fetch: list[str] = []
@@ -292,47 +296,12 @@ class YahooFinanceClient:
             revenue_growth=_coerce_number(info.get('revenueGrowth')),
             exchange=info.get('exchange'),
             quote_type=info.get('quoteType'),
+            dividend_yield=_dividend_yield(info),
+            sector=info.get('sector'),
         )
 
         self.cache.set(f'fundamentals:{ticker}', entry.__dict__, ttl_seconds=self.settings.fundamentals_ttl_hours * 3600)
         return entry
-
-    def fetch_earnings_dates(self, tickers: list[str], force_refresh: bool = False) -> dict[str, str]:
-        """Next earnings date (string) per ticker; best-effort, cached, missing skipped."""
-        return self._fetch_missing_parallel(
-            tickers,
-            cache_key=lambda t: f'earnings:{t}',
-            from_cache=lambda cached: cached.get('date') or None,
-            fetch_one=self._fetch_one_earnings,
-            force_refresh=force_refresh,
-        )
-
-    def _fetch_one_earnings(self, ticker: str) -> str | None:
-        date = self._resolve_earnings_date(ticker)
-        # Negative-cache misses too, so names with no upcoming date are not re-hit
-        # every run; a transient fetch failure caches None and simply retries next TTL.
-        self.cache.set(
-            f'earnings:{ticker}', {'date': date},
-            ttl_seconds=self.settings.cache_ttl_hours * 3600,
-        )
-        return date
-
-    def _resolve_earnings_date(self, ticker: str) -> str | None:
-        try:
-            cal = self._with_retry(
-                lambda t=ticker: yf.Ticker(t).calendar,
-                operation=f'fetch earnings {ticker}',
-            )
-        except DataFetchError as exc:
-            self.logger.warning('Skipping earnings for %s: %s', ticker, exc)
-            return None
-        if not cal:
-            return None
-        dates = cal.get('Earnings Date') if isinstance(cal, dict) else None
-        if not dates:
-            return None
-        first = dates[0] if isinstance(dates, (list, tuple)) else dates
-        return str(first)
 
     def filter_allowed_exchanges(
         self, fundamentals: dict[str, Fundamentals]
@@ -355,57 +324,6 @@ class YahooFinanceClient:
             self.logger.warning('Excluded %s symbols outside allowed exchanges', len(excluded))
 
         return included, excluded
-
-    def fetch_fund_holdings(
-        self, tickers: list[str], force_refresh: bool = False
-    ) -> dict[str, FundHoldings]:
-        """Top-holdings look-through for each fund ticker (cached)."""
-        return self._fetch_missing_parallel(
-            tickers,
-            cache_key=lambda t: f'fund_holdings:{t}',
-            from_cache=lambda cached: FundHoldings(**cached),
-            fetch_one=self._fetch_one_fund_holdings,
-            force_refresh=force_refresh,
-        )
-
-    def _fetch_one_fund_holdings(self, ticker: str) -> FundHoldings | None:
-        try:
-            top = self._with_retry(
-                lambda t=ticker: yf.Ticker(t).funds_data.top_holdings,
-                operation=f'fetch fund holdings {ticker}',
-            )
-        except DataFetchError as exc:
-            self.logger.warning('Skipping fund holdings for %s: %s', ticker, exc)
-            return None
-
-        if top is None or getattr(top, 'empty', True):
-            return None
-
-        holdings: dict[str, float] = {}
-        names: dict[str, str] = {}
-        for symbol, row in top.iterrows():
-            pct = _coerce_number(row.get('Holding Percent'))
-            if pct is None:
-                continue
-            sym = str(symbol)
-            holdings[sym] = float(pct)
-            name = row.get('Name')
-            if name is not None:
-                names[sym] = str(name)
-
-        if not holdings:
-            return None
-        entry = FundHoldings(
-            ticker=ticker,
-            holdings=holdings,
-            names=names,
-            top_weight_total=sum(holdings.values()),
-        )
-        self.cache.set(
-            f'fund_holdings:{ticker}', entry.__dict__,
-            ttl_seconds=self.settings.cache_ttl_hours * 3600,
-        )
-        return entry
 
 
 def _coerce_number(value: Any) -> float | None:

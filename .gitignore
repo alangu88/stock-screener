@@ -224,15 +224,14 @@ positions.txt
 reports/
 
 # Local-only research & backtesting (the R&D used to build/validate the model
-# stays private; only the live model and its performance metrics are public)
-scripts/backtest_portfolio.py
-scripts/backtest_scalein.py
-scripts/backtest_stops.py
-scripts/research_runner.py
+# stays private; only the live model is public)
 scripts/research_setup.py
+scripts/compare_signal_models.py
 src/backtest/runner.py
 src/backtest/stops.py
 src/backtest/parallel.py
 src/backtest/feature_panel.py
+src/backtest/point_in_time.py
 tests/unit/test_backtest_stops.py
 tests/unit/test_feature_panel.py
+tests/unit/test_point_in_time.py

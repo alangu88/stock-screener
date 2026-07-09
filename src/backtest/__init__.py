@@ -1,5 +1,6 @@
-"""Performance metrics for evaluating strategy equity curves.
+"""Local-only research harness (signal-model + setup-quality backtesting).
 
-Pure calculations (drawdown, CAGR, compounded equity curve) used to quantify how
-a stream of closed trades would have performed.
+Not part of the live screener. The modules here -- entry generation, per-trade
+stop simulation, feature panels, and point-in-time membership -- support the
+private research scripts in ``scripts/`` and are kept out of the public repo.
 """

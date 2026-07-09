@@ -20,31 +20,27 @@ if str(ROOT) not in sys.path:
 import streamlit as st  # noqa: E402
 
 from src.ui.charts import render_chart_section  # noqa: E402
-from src.ui.positions import render_positions  # noqa: E402
-from src.ui.recommendations import render_recommendations  # noqa: E402
-from src.ui.report import render_daily_report  # noqa: E402
+from src.ui.screener import render_screener  # noqa: E402
 from src.ui.services import get_services  # noqa: E402
 from src.ui.sidebar import render_cache_controls, render_sidebar  # noqa: E402
 
-st.set_page_config(page_title='Position Manager & Screener', layout='wide')
+st.set_page_config(page_title='S&P 500 Stock Screener', layout='wide')
 
 
 def run() -> None:
     settings, cache, client, engine = get_services()
 
-    st.title('Position Manager & S&P 500 Screener')
+    st.title('S&P 500 Stock Screener')
     st.caption(
-        'Track your holdings, size adds by risk, surface high-conviction setups, '
-        'and chart any name — powered by Yahoo Finance data with daily caching.'
+        'Data-driven screening for high-conviction technical setups — ranked by '
+        'quality and market context, with structural entry/stop/target levels and '
+        'charts for any name. Powered by Yahoo Finance data with daily caching.'
     )
 
     render_cache_controls(cache)
-    config, portfolio, view = render_sidebar(settings)
-    engine.portfolio = portfolio
-    render_positions(client, settings, engine, config)
-    render_recommendations(cache, client, settings, engine)
+    config, view = render_sidebar(settings)
+    render_screener(cache, client, settings, engine, config)
     render_chart_section(client, settings, engine, view.rsi_period)
-    render_daily_report()
 
 
 if __name__ == '__main__':

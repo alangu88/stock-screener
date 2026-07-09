@@ -1,7 +1,9 @@
 import pandas as pd
 
+from src.config import SIGNAL_MODEL_MA_DC_VOLUME
 from src.data.universe import UniverseResult
 from src.screener.engine import FilterConfig, ScreenerEngine
+from src.screener.strategy import StrategyConfig
 
 
 class _FakeFundamental:
@@ -12,6 +14,8 @@ class _FakeFundamental:
         self.pe_ratio = pe
         self.revenue_growth = rev
         self.exchange = exchange
+        self.dividend_yield = None
+        self.sector = None
 
 
 def _breakout_close() -> list[float]:
@@ -105,7 +109,12 @@ class _RiskOffClient(FakeClient):
 
 
 def test_require_regime_suppresses_adds_when_risk_off():
-    engine = ScreenerEngine(client=_RiskOffClient())
+    # Use the non-regime volume model so this isolates the require_regime FILTER
+    # (the regime model would itself suppress risk-off breakouts, confounding it).
+    engine = ScreenerEngine(
+        client=_RiskOffClient(),
+        strategy=StrategyConfig(signal_model=SIGNAL_MODEL_MA_DC_VOLUME),
+    )
     universe = UniverseResult(tickers=['AAA', 'BBB'], companies={'AAA': 'A Co', 'BBB': 'B Co'})
 
     gated = engine.screen(

@@ -9,12 +9,12 @@ from src.analysis.indicators import sma
 from src.config import Settings
 from src.data.universe import UniverseResult
 from src.data.yahoo_client import Fundamentals, YahooFinanceClient
-from src.screener.portfolio import PortfolioConfig, assign_portfolio
 from src.screener.ranking import (
     MarketContext,
     assess_market_context,
     composite_rank,
     confidence_score,
+    regime_suppresses_entry,
 )
 from src.screener.result import RESULT_COLUMNS
 from src.screener.setups import AVOID, Setup, detect_setup
@@ -45,6 +45,13 @@ ANALYSIS_COLUMNS: tuple[str, ...] = (
     'Trend Score',
     'RS Outperformance',
     'Rel Volume',
+    'Beta',
+    'Return 3M',
+    'ATR %',
+    'Dist 200D %',
+    'Dollar ADV',
+    'Div Yield',
+    'Sector',
     'Market Cap',
     'PE Ratio',
     'Revenue Growth',
@@ -105,11 +112,9 @@ class ScreenerEngine:
         self,
         client: YahooFinanceClient,
         strategy: StrategyConfig | None = None,
-        portfolio: PortfolioConfig | None = None,
     ):
         self.client = client
         self.strategy = strategy or StrategyConfig()
-        self.portfolio = portfolio or PortfolioConfig()
 
     def screen(
         self,
@@ -128,8 +133,7 @@ class ScreenerEngine:
         ]
         if not rows:
             return _empty_frame()
-        portfolio = assign_portfolio(pd.DataFrame(rows), self.portfolio)
-        return portfolio.reindex(columns=list(RESULT_COLUMNS))
+        return pd.DataFrame(rows).reindex(columns=list(RESULT_COLUMNS))
 
     def analyze(
         self,
@@ -155,7 +159,7 @@ class ScreenerEngine:
                 ticker, inputs.history.get(ticker), inputs.benchmark_close, inputs.fundamentals, universe
             )
             if analysis is not None:
-                rows.append(self._analysis_row(ticker, analysis, inputs.context, config))
+                rows.append(self._analysis_row(ticker, analysis, inputs.context, config, inputs.regime_ok))
         if not rows:
             return _empty_analysis_frame()
         return pd.DataFrame(rows).reindex(columns=list(ANALYSIS_COLUMNS))
@@ -196,7 +200,7 @@ class ScreenerEngine:
         analysis = self._compute_ticker(
             ticker, inputs.history.get(ticker), inputs.benchmark_close, inputs.fundamentals, universe
         )
-        if analysis is None or not self._passes_gates(analysis, config):
+        if analysis is None or not self._passes_gates(analysis, config, inputs.regime_ok):
             return None
         # Risk-off regime gate: backtests show entries taken while SPY trades
         # below its long SMA roughly halve expectancy, so suppress new adds.
@@ -221,6 +225,7 @@ class ScreenerEngine:
         analysis: _TickerAnalysis,
         context: MarketContext,
         config: FilterConfig,
+        regime_ok: bool = True,
     ) -> dict:
         """Build an ungated analysis row, falling back to management levels.
 
@@ -243,7 +248,7 @@ class ScreenerEngine:
             rank,
             context,
         )
-        row['Actionable'] = self._passes_gates(analysis, config)
+        row['Actionable'] = self._passes_gates(analysis, config, regime_ok)
         return row
 
     def _compute_ticker(
@@ -268,11 +273,14 @@ class ScreenerEngine:
         company_name = fundamental.company_name or universe.companies.get(ticker, '')
         return _TickerAnalysis(features, setup, plan, confidence, fundamental, company_name)
 
-    def _passes_gates(self, analysis: _TickerAnalysis, config: FilterConfig) -> bool:
+    def _passes_gates(self, analysis: _TickerAnalysis, config: FilterConfig,
+                      risk_on: bool = True) -> bool:
         """Return whether an analysis clears the screen's actionability gates."""
         if analysis.features.avg_volume < config.min_avg_volume:
             return False
         if analysis.setup.setup_type == AVOID:
+            return False
+        if regime_suppresses_entry(self.strategy.signal_model, risk_on, analysis.setup.setup_type):
             return False
         if config.setups is not None and analysis.setup.setup_type not in config.setups:
             return False
@@ -312,6 +320,13 @@ def _result_row(
         'Trend Score': features.trend_score,
         'RS Outperformance': features.rs_outperformance,
         'Rel Volume': features.rel_volume,
+        'Beta': features.beta,
+        'Return 3M': features.return_3m,
+        'ATR %': features.atr_pct,
+        'Dist 200D %': (features.price / features.ma_long - 1.0) if features.ma_long else None,
+        'Dollar ADV': features.avg_volume * features.price,
+        'Div Yield': fundamental.dividend_yield,
+        'Sector': fundamental.sector,
         'Market Cap': fundamental.market_cap,
         'PE Ratio': fundamental.pe_ratio,
         'Revenue Growth': fundamental.revenue_growth,

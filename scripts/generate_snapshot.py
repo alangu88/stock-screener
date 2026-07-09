@@ -1,10 +1,10 @@
 """Generate the daily screener snapshot and write it into the README.
 
 Headless entry point for CI (GitHub Actions) and local runs. It builds the
-watchlist (your holdings plus followed names), screens the S&P 500 for fresh
-high-conviction adds, renders a Markdown block, and replaces the marked region
-in README.md. Network failures (e.g. Yahoo throttling CI IPs) are caught and
-turned into an "unavailable" notice so the README is never left half-written.
+watchlist (the names you follow), screens the S&P 500 for fresh high-conviction
+setups, renders a Markdown block, and replaces the marked region in README.md.
+Network failures (e.g. Yahoo throttling CI IPs) are caught and turned into an
+"unavailable" notice so the README is never left half-written.
 
 Run from the repo root:
     python scripts/generate_snapshot.py
@@ -28,6 +28,7 @@ from src.data.universe import (  # noqa: E402
     UniverseResult,
     load_sp500_universe,
     normalize_ticker,
+    watchlist_tickers,
 )
 from src.data.yahoo_client import YahooFinanceClient  # noqa: E402
 from src.export.markdown_export import (  # noqa: E402
@@ -36,20 +37,11 @@ from src.export.markdown_export import (  # noqa: E402
     inject_between_markers,
 )
 from src.screener.engine import FilterConfig, ScreenerEngine  # noqa: E402
-from src.screener.holdings import (  # noqa: E402
-    merge_holdings,
-    parse_portfolio,
-    parse_positions,
-)
-from src.screener.portfolio import PortfolioConfig  # noqa: E402
 from src.screener.strategy import StrategyConfig  # noqa: E402
-from src.utils.files import read_text_or_empty  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
 
 README_PATH = _REPO_ROOT / 'README.md'
 WATCHLIST_PATH = _REPO_ROOT / 'watchlist.txt'
-PORTFOLIO_PATH = _REPO_ROOT / 'portfolio.txt'
-POSITIONS_PATH = _REPO_ROOT / 'positions.txt'
 DEFAULT_SYMBOLS = 0  # 0 (or unset) => screen the entire S&P 500 universe
 DEFAULT_LIMIT = 20
 _LOGGER = get_logger('generate_snapshot')
@@ -63,20 +55,6 @@ def _env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
-
-
-def _held_tickers() -> set[str]:
-    """Tickers already held (committed composition merged with private sizes)."""
-    portfolio_entries = parse_portfolio(read_text_or_empty(PORTFOLIO_PATH))
-    position_entries = parse_positions(read_text_or_empty(POSITIONS_PATH))
-    merged = merge_holdings(portfolio_entries, position_entries)
-    return {normalize_ticker(entry.ticker) for entry in merged}
-
-
-def _followed_and_held(held: set[str]) -> list[str]:
-    """Followed names plus all held positions, normalized and de-duplicated."""
-    followed = {normalize_ticker(entry.ticker) for entry in parse_portfolio(read_text_or_empty(WATCHLIST_PATH))}
-    return sorted(followed | held)
 
 
 def _trim_tickers(tickers: list[str], max_symbols: int) -> list[str]:
@@ -105,11 +83,9 @@ def main() -> int:
     engine = ScreenerEngine(
         client=client,
         strategy=StrategyConfig.from_settings(settings),
-        portfolio=PortfolioConfig.from_settings(settings),
     )
 
-    held = _held_tickers()
-    watchlist = _followed_and_held(held)
+    watchlist = sorted({normalize_ticker(t) for t in watchlist_tickers(WATCHLIST_PATH)})
 
     try:
         sp500 = load_sp500_universe(cache)
@@ -130,7 +106,7 @@ def main() -> int:
         )
         recommended = engine.screen(add_universe, config=add_config)
 
-        # Watchlist monitor: ungated analysis of every followed/held name.
+        # Watchlist monitor: ungated analysis of every followed name.
         watch_universe = UniverseResult(
             tickers=watchlist, companies={t: companies.get(t, '') for t in watchlist}
         )

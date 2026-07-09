@@ -12,7 +12,6 @@ from src.config import Settings, load_settings
 from src.data.cache import SQLiteCache
 from src.data.yahoo_client import YahooFinanceClient
 from src.screener.engine import ScreenerEngine
-from src.screener.portfolio import PortfolioConfig
 from src.screener.strategy import StrategyConfig
 
 
@@ -24,6 +23,5 @@ def get_services() -> tuple[Settings, SQLiteCache, YahooFinanceClient, ScreenerE
     engine = ScreenerEngine(
         client=client,
         strategy=StrategyConfig.from_settings(settings),
-        portfolio=PortfolioConfig.from_settings(settings),
     )
     return settings, cache, client, engine

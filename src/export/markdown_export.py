@@ -5,9 +5,9 @@ stays consistent with the rest of the pipeline. No network, no Streamlit --
 everything is derived from the frames the engine already produces, which keeps
 it easy to unit test.
 
-The snapshot has two sections: the **watchlist** (your holdings plus followed
-names, monitored whether or not they are actionable) and the **recommended
-adds** (fresh high-conviction setups that clear the advisor gates).
+The snapshot has two sections: the **watchlist** (the names you follow,
+monitored whether or not they are actionable) and the **recommended adds**
+(fresh high-conviction setups that clear the screen gates).
 """
 
 from __future__ import annotations
@@ -26,14 +26,19 @@ END_MARKER = '<!-- SCREENER:END -->'
 _PICK_COLUMNS = (
     'Ticker',
     'Setup',
-    'Sleeve',
     'Entry',
     'Stop',
     'Target',
     'R/R',
     'Confidence',
     'Rank Score',
-    'Position Size %',
+    'Beta',
+    'ATR %',
+    'Dist 200D %',
+    'Return 3M',
+    'Div Yield',
+    'Dollar ADV',
+    'Sector',
 )
 
 # Columns shown in the "watchlist" monitor table, in display order.
@@ -46,6 +51,13 @@ _WATCHLIST_COLUMNS = (
     'Stop',
     'Target',
     'Rank Score',
+    'Beta',
+    'ATR %',
+    'Dist 200D %',
+    'Return 3M',
+    'Div Yield',
+    'Dollar ADV',
+    'Sector',
     'Actionable',
 )
 
@@ -70,6 +82,10 @@ def _percent(value) -> str:
     return number(value, '.2f', scale=100, suffix='%', missing='-')
 
 
+def _dollars0(value) -> str:
+    return number(value, ',.0f', missing='-')
+
+
 def _text(value) -> str:
     return _shared_text(value, missing='')
 
@@ -81,14 +97,19 @@ def _flag(value) -> str:
 _PICK_FORMATTERS = {
     'Ticker': _text,
     'Setup': _text,
-    'Sleeve': _text,
     'Entry': _money,
     'Stop': _money,
     'Target': _money,
     'R/R': _ratio,
     'Confidence': _integer,
     'Rank Score': _ratio,
-    'Position Size %': _percent,
+    'Beta': _ratio,
+    'ATR %': _percent,
+    'Dist 200D %': _percent,
+    'Return 3M': _percent,
+    'Div Yield': _percent,
+    'Dollar ADV': _dollars0,
+    'Sector': _text,
 }
 
 _WATCHLIST_FORMATTERS = {
@@ -100,6 +121,13 @@ _WATCHLIST_FORMATTERS = {
     'Stop': _money,
     'Target': _money,
     'Rank Score': _ratio,
+    'Beta': _ratio,
+    'ATR %': _percent,
+    'Dist 200D %': _percent,
+    'Return 3M': _percent,
+    'Div Yield': _percent,
+    'Dollar ADV': _dollars0,
+    'Sector': _text,
     'Actionable': _flag,
 }
 
@@ -152,14 +180,12 @@ def recommended_to_markdown(df: pd.DataFrame, limit: int = 15) -> str:
 
 
 def _parameters_line(settings: Settings) -> str:
-    """One-line summary of the active risk and portfolio parameters."""
+    """One-line summary of the active screen gates."""
     parts = (
-        f'Risk/trade {settings.risk_per_trade:.0%}',
-        f'Core band {settings.core_allocation_min:.0%}\u2013{settings.core_allocation_max:.0%}',
-        f'Add gates conf \u2265 {settings.rec_min_confidence:.0f} & R/R \u2265 '
+        f'Signal model {settings.signal_model}',
+        f'Gates conf \u2265 {settings.rec_min_confidence:.0f} & R/R \u2265 '
         f'{settings.rec_min_reward_risk:.1f}',
-        f'Max {settings.max_individual_stocks} single-stock names',
-        f'Max position {settings.max_position_weight:.0%}',
+        f'Min avg volume {settings.min_avg_volume:,}',
     )
     return '> **Parameters:** ' + ' \u00b7 '.join(parts)
 
@@ -188,9 +214,9 @@ def build_snapshot_markdown(
             badges,
             f'_Last updated: {generated_at}_',
             _parameters_line(settings),
-            '#### Watchlist (your holdings + followed names)',
+            '#### Watchlist (followed names)',
             watchlist_to_markdown(watchlist_df),
-            '#### Recommended adds (clear the gates)',
+            '#### Recommended adds (clear the screen gates)',
             recommended_to_markdown(recommended_df, limit=limit),
             '> Mechanical signals for research only \u2014 not trade recommendations.',
         )

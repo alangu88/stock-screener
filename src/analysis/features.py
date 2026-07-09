@@ -24,10 +24,7 @@ from src.analysis.indicators import (
     slope_pct,
     sma,
 )
-from src.analysis.relative_strength import (
-    blended_outperformance,
-    rs_line_at_high,
-)
+from src.analysis.relative_strength import beta, blended_outperformance, total_return
 from src.screener.strategy import StrategyConfig
 
 MIN_BARS = 60
@@ -53,9 +50,10 @@ class MarketFeatures:
     pct_from_high: float  # <= 0, distance below the high
     pct_above_low: float
 
-    # Relative strength
+    # Relative strength, risk & momentum
     rs_outperformance: float
-    rs_line_new_high: bool
+    beta: float  # CAPM beta of daily returns vs the benchmark
+    return_3m: float  # ~63-trading-day price return
 
     # Structure / levels
     pivot: float
@@ -110,9 +108,8 @@ def compute_features(
     rs_outperformance = blended_outperformance(
         close, benchmark_close, config.rs_lookbacks, config.rs_weights
     )
-    rs_line_new_high = rs_line_at_high(
-        close, benchmark_close, config.rs_line_window, tolerance=0.02
-    )
+    beta_value = beta(close, benchmark_close)
+    return_3m = total_return(close, 63)
 
     pivot = _prior_extreme(high, config.breakout_window, kind='high', fallback=price)
     recent_high = _prior_extreme(high, config.recent_high_window, kind='high', fallback=price)
@@ -161,7 +158,8 @@ def compute_features(
         pct_from_high=pct_from_high,
         pct_above_low=pct_above_low,
         rs_outperformance=rs_outperformance,
-        rs_line_new_high=rs_line_new_high,
+        beta=beta_value,
+        return_3m=return_3m,
         pivot=pivot,
         recent_high=recent_high,
         pivot_low=pivot_low,

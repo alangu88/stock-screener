@@ -1,15 +1,13 @@
 """Setup detection.
 
 Classifies the most meaningful, *actionable* technical setup for a symbol from
-its :class:`MarketFeatures`. The taxonomy and priority order encode principles
-shared by leadership-momentum and trend-following traders:
+its :class:`MarketFeatures`, using a volume-primary model:
 
-* Trade with the primary trend (Weinstein Stage 2, Minervini trend template).
-* Demand relative-strength leadership (O'Neil RS, Minervini RS line).
-* Prefer supply-drying-up structure: contractions and quiet pullbacks
-  (Minervini VCP, Wyckoff accumulation, Darvas boxes).
-* Require confirmation (volume expansion on breakouts) rather than prediction.
-* When nothing is actionable, say so -- quality over quantity.
+* **Moving averages** define whether the primary trend is intact.
+* **Donchian channel** levels define the actionable breakout / pullback.
+* **Volume is the decisive confirmation** -- breakouts need a surge plus net
+  accumulation; pullbacks must be quiet yet still show accumulation.
+* When nothing is confirmed, say so -- quality over quantity.
 
 This module makes the *decision*; it computes no prices.
 """
@@ -22,31 +20,31 @@ from src.analysis.features import MarketFeatures
 from src.screener.strategy import StrategyConfig
 
 BREAKOUT = 'Breakout'
-CONTRACTION = 'Volatility Contraction'
 PULLBACK = 'Pullback'
 AVOID = 'Avoid'
+
+# --- Volume-primary detection thresholds ------------------------------------
+# The model leads with volume: a Donchian/MA-aligned trend is a necessary
+# filter, but a signal only fires when volume confirms it. Kept intentionally
+# simple so the model stays interpretable.
+BREAKOUT_VOLUME_SURGE_MULT = 1.5  # breakout day must exceed this x average
+MIN_ACCUMULATION_RATIO = 1.0  # up/down volume must show net accumulation
+QUIET_PULLBACK_VOLUME_MULT = 1.2  # pullback volume must stay below this x avg
 
 # Relative quality of each setup family, weighted toward *realized* edge.
 # Walk-forward backtests (full S&P 500, 5y, regime-on, conf>=75 / R:R>=2.5, with
 # the structural target exit held constant) found Breakouts the strongest setup
 # by a wide margin -- ExpR 0.84R vs 0.36R for Pullbacks across 305 vs 1647
 # trades, with ~2.3x the Sharpe and profit factor (2.53 vs 1.54) and a higher
-# win rate (45% vs 33%). Pullbacks remain the workhorse on volume; Contractions
-# sit between. Breakout quality is therefore at parity with Pullbacks rather
-# than discounted. Reversal was removed earlier for negative expectancy. These
-# weights reflect that evidence; re-run scripts/backtest_stops.py --by-setup to
-# revisit. (Breakouts are the most regime-sensitive family, so this assumes the
-# live risk-on gate stays on.)
-# Contraction is an anticipatory buy-stop, so it was historically discounted
-# (0.84) for execution uncertainty. But simulating the buy-stop fill over a
-# replay (enter when price clears the pivot within ~20 bars, else no trade)
-# shows TRIGGERED contractions realize ~0.67-0.70R (10y/5y, S&P 500) -- robustly
-# stronger than pullbacks (~0.32-0.42R) and close to breakouts (~0.72-0.93R).
-# The discount was backwards, so contraction is raised to parity with the others.
+# win rate (45% vs 33%). Pullbacks remain the workhorse on volume. Breakout
+# quality is therefore at parity with Pullbacks rather than discounted. Reversal
+# was removed earlier for negative expectancy. These weights reflect that
+# evidence; re-run scripts/research_setup.py to revisit. (Breakouts
+# are the most regime-sensitive family, so this assumes the live risk-on gate
+# stays on.)
 SETUP_QUALITY = {
     PULLBACK: 0.88,
     BREAKOUT: 0.88,
-    CONTRACTION: 0.88,
     AVOID: 0.0,
 }
 
@@ -109,25 +107,91 @@ class Setup:
 
 
 def detect_setup(features: MarketFeatures, config: StrategyConfig) -> Setup:
-    f = features
-    uptrend = f.trend_score >= 0.7 and f.price > f.ma_long
-    rs_strong = f.rs_outperformance > 0
-    contracting = f.contraction_ratio <= config.contraction_ratio
+    """Classify the most actionable setup from a symbol's features."""
+    return _detect_setup_ma_dc_volume(features, config)
 
-    pivot_gap = (f.pivot - f.price) / f.pivot if f.pivot else 0.0
-    near_pivot_below = 0 < pivot_gap <= config.pivot_proximity
+
+def _detect_setup_ma_dc_volume(features: MarketFeatures, config: StrategyConfig) -> Setup:
+    """Volume-primary model built on MA trend + Donchian channel breaks.
+
+    * **Moving averages** define whether the primary trend is intact
+      (price > fast MA > long MA, with a rising long MA). No trend, no trade.
+    * **Donchian channel** (the ``breakout_window``-day prior high, already the
+      ``pivot``) defines the actionable level: a clean channel breakout or a
+      pullback holding above the long MA while below the channel top.
+    * **Volume is the decisive confirmation.** A breakout must arrive on a real
+      volume surge *and* net accumulation; a pullback must be quiet (supply
+      absorbed) yet still show accumulation and rising OBV. Volume failure
+      demotes an otherwise-aligned chart to ``Avoid``.
+    """
+    f = features
+    ma_uptrend = f.price > f.ma_fast > f.ma_long and f.ma_long_slope > 0
+
     breaking_out = f.pivot <= f.price <= f.pivot * (1 + config.extended_threshold)
     extended = f.price > f.pivot * (1 + config.extended_threshold)
-    volume_breakout = f.rel_volume >= config.breakout_volume_mult
     in_pullback = _in_pullback_zone(f, config)
 
-    if uptrend and rs_strong and breaking_out and volume_breakout:
-        return _breakout(f, config)
-    if uptrend and rs_strong and contracting and near_pivot_below:
-        return _contraction(f, config)
-    if uptrend and rs_strong and in_pullback:
-        return _pullback(f, config)
-    return _avoid(f, config, uptrend=uptrend, rs_strong=rs_strong, extended=extended)
+    volume_surge = f.rel_volume >= BREAKOUT_VOLUME_SURGE_MULT
+    accumulation = f.updown_volume_ratio >= MIN_ACCUMULATION_RATIO
+    quiet_volume = f.rel_volume <= QUIET_PULLBACK_VOLUME_MULT
+    obv_rising = f.obv_slope > 0
+
+    if ma_uptrend and breaking_out and volume_surge and accumulation:
+        return _breakout_volume(f, config)
+    if ma_uptrend and in_pullback and quiet_volume and accumulation and obv_rising:
+        return _pullback_volume(f, config)
+    return _avoid_volume(f, config, ma_uptrend=ma_uptrend, extended=extended)
+
+
+def _breakout_volume(f: MarketFeatures, config: StrategyConfig) -> Setup:
+    factors = [
+        f'Cleared the {config.breakout_window}-day Donchian high near {f.pivot:.2f}',
+        f'Volume surge {f.rel_volume:.1f}x the {config.volume_window}-day average (primary trigger)',
+        f'Up/down volume {f.updown_volume_ratio:.2f} confirms net accumulation',
+        f'MA trend intact: price > {config.ma_fast}MA > {config.ma_long}MA (rising long MA)',
+    ]
+    risks = [
+        'Breakouts can fail without follow-through; honor the stop below the channel',
+    ]
+    if f.obv_slope <= 0:
+        risks.append('OBV not yet confirming — watch for a volume-less push')
+    if f.atr_pct > 0.05:
+        risks.append(f'Elevated volatility (ATR {f.atr_pct:.1%} of price)')
+    return Setup(
+        BREAKOUT, 'Volume-confirmed Donchian breakout in an MA uptrend',
+        tuple(factors), tuple(risks),
+    )
+
+
+def _pullback_volume(f: MarketFeatures, config: StrategyConfig) -> Setup:
+    factors = [
+        f'Quiet pullback to support near the {config.ema_trend}EMA/{config.ma_fast}MA',
+        f'Volume {f.rel_volume:.1f}x average — supply absorbed on the dip',
+        f'Up/down volume {f.updown_volume_ratio:.2f} and rising OBV show accumulation',
+        f'Uptrend intact (price above the {config.ma_long}MA)',
+    ]
+    risks = [
+        'Support can break; invalidation sits below the recent swing low',
+    ]
+    return Setup(
+        PULLBACK, 'Volume-backed pullback to rising support',
+        tuple(factors), tuple(risks),
+    )
+
+
+def _avoid_volume(
+    f: MarketFeatures, config: StrategyConfig, *, ma_uptrend: bool, extended: bool
+) -> Setup:
+    reasons = []
+    if extended:
+        reasons.append(f'Extended {((f.price - f.pivot) / f.pivot):+.1%} past the Donchian high -- chasing risk')
+    if not ma_uptrend:
+        reasons.append(f'MA trend not intact (need price > {config.ma_fast}MA > {config.ma_long}MA, rising long MA)')
+    if f.updown_volume_ratio < MIN_ACCUMULATION_RATIO:
+        reasons.append(f'Volume distribution (up/down volume {f.updown_volume_ratio:.2f} < 1.0)')
+    if not reasons:
+        reasons.append('No volume-confirmed trigger right now')
+    return Setup(AVOID, '; '.join(reasons), (), ('Capital preservation: no volume-confirmed edge',))
 
 
 def _in_pullback_zone(f: MarketFeatures, config: StrategyConfig) -> bool:
@@ -136,65 +200,3 @@ def _in_pullback_zone(f: MarketFeatures, config: StrategyConfig) -> bool:
     below_pivot = f.price < f.pivot
     quiet = f.rel_volume < config.breakout_volume_mult
     return (near_ema or near_ma) and below_pivot and quiet
-
-
-def _breakout(f: MarketFeatures, config: StrategyConfig) -> Setup:
-    factors = [
-        f'Broke above the {config.breakout_window}-day pivot near {f.pivot:.2f}',
-        f'Volume {f.rel_volume:.1f}x the {config.volume_window}-day average confirms demand',
-        f'Trend template {f.trend_score:.0%}; price above stacked 50/150/200 MAs',
-        f'Leading the market ({f.rs_outperformance:+.1%} vs SPY)',
-    ]
-    if f.rs_line_new_high:
-        factors.append('Relative-strength line at new highs (institutional leadership)')
-    risks = [
-        'Breakouts can fail without follow-through; honor the stop below the base',
-    ]
-    if f.base_depth > 0.20:
-        risks.append(f'Base is deep ({f.base_depth:.0%}); stop distance is wider than ideal')
-    if f.atr_pct > 0.05:
-        risks.append(f'Elevated volatility (ATR {f.atr_pct:.1%} of price)')
-    return Setup(BREAKOUT, 'Confirmed breakout from a base in a leading uptrend', tuple(factors), tuple(risks))
-
-
-def _contraction(f: MarketFeatures, config: StrategyConfig) -> Setup:
-    factors = [
-        f'Volatility contracting (short/long ATR {f.contraction_ratio:.2f}) -- supply drying up',
-        f'Coiled {((f.pivot - f.price) / f.pivot):.1%} under the {config.breakout_window}-day pivot {f.pivot:.2f}',
-        f'Trend template {f.trend_score:.0%}; leading SPY ({f.rs_outperformance:+.1%})',
-    ]
-    if f.updown_volume_ratio > 1.2:
-        factors.append(f'Up/down volume {f.updown_volume_ratio:.1f} shows quiet accumulation')
-    risks = [
-        'Anticipatory setup: only triggers if price clears the pivot on volume',
-        'A failed breakout can reverse quickly; the buy-stop defines risk',
-    ]
-    return Setup(CONTRACTION, 'Volatility contraction coiling below a pivot', tuple(factors), tuple(risks))
-
-
-def _pullback(f: MarketFeatures, config: StrategyConfig) -> Setup:
-    factors = [
-        f'Healthy pullback to support near the {config.ema_trend}EMA/{config.ma_fast}MA',
-        f'Uptrend intact (trend template {f.trend_score:.0%})',
-        f'Still leading SPY ({f.rs_outperformance:+.1%})',
-        'Pullback on below-average volume (supply absorbed)',
-    ]
-    risks = [
-        'Support can break; invalidation sits below the recent swing low',
-    ]
-    if f.rs_outperformance < 0.02:
-        risks.append('Relative strength only marginally positive')
-    return Setup(PULLBACK, 'Trend continuation pullback to rising support', tuple(factors), tuple(risks))
-
-
-def _avoid(f: MarketFeatures, config: StrategyConfig, *, uptrend: bool, rs_strong: bool, extended: bool) -> Setup:
-    reasons = []
-    if extended:
-        reasons.append(f'Extended {((f.price - f.pivot) / f.pivot):+.1%} past the pivot -- chasing risk')
-    if not uptrend:
-        reasons.append(f'Trend not confirmed (template {f.trend_score:.0%}, price vs 200MA)')
-    if not rs_strong:
-        reasons.append(f'Lagging the market ({f.rs_outperformance:+.1%} vs SPY)')
-    if not reasons:
-        reasons.append('No actionable entry trigger right now')
-    return Setup(AVOID, '; '.join(reasons), (), ('Capital preservation: no edge identified',))

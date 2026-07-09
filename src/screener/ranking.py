@@ -2,10 +2,10 @@
 
 Two deterministic scores drive the screener:
 
-* **Confidence (0-100)** -- how good *this* setup is, blending trend quality,
-  relative strength, setup family, accumulation/volume, volatility contraction,
-  and reward/risk asymmetry. Capital preservation is built in: anything without
-  a valid, asymmetric plan scores zero.
+* **Confidence (0-100)** -- how good *this* setup is: a volume-primary blend of
+  volume quality, MA-trend quality, setup family, and reward/risk asymmetry.
+  Capital preservation is built in: anything without a valid, asymmetric plan
+  scores zero.
 * **Composite rank** -- confidence scaled by the broad-market regime, so the
   same setup ranks higher in a healthy tape than in a hostile one.
 
@@ -21,13 +21,36 @@ import pandas as pd
 
 from src.analysis.features import MarketFeatures
 from src.analysis.indicators import slope_pct, sma
-from src.screener.setups import AVOID, Setup, setup_quality
+from src.config import SIGNAL_MODEL_MA_DC_VOLUME_REGIME
+from src.screener.setups import AVOID, BREAKOUT, Setup, setup_quality
 from src.screener.strategy import StrategyConfig
 from src.screener.trade_plan import TradePlan
 from src.utils.numeric import clamp
 
-RS_NORM = 0.15  # +/-15% blended outperformance spans the 0..1 RS scale
 DISTRIBUTION_DISCOUNT = 0.90  # multiplier applied when up/down volume < 1.0
+
+
+def regime_suppresses_entry(signal_model: str, risk_on: bool, setup_type: str) -> bool:
+    """Whether the regime-aware model drops this entry.
+
+    Edge attribution showed risk-off breakouts are negative-EV for the volume
+    model (~-0.02R over 10y) while risk-off pullbacks stay positive (~+0.30R).
+    So the regime-aware variant suppresses *only* risk-off breakouts, leaving the
+    profitable risk-on book and risk-off pullbacks untouched.
+    """
+    return (
+        signal_model == SIGNAL_MODEL_MA_DC_VOLUME_REGIME
+        and not risk_on
+        and setup_type == BREAKOUT
+    )
+
+# Volume-primary confidence weights. Sum to 1.0 across the four components.
+VOLUME_CONFIDENCE_WEIGHTS = {
+    'volume': 0.40,
+    'trend': 0.25,
+    'reward': 0.20,
+    'setup': 0.15,
+}
 
 
 @dataclass(frozen=True)
@@ -58,46 +81,43 @@ def confidence_score(
 ) -> float:
     if setup.setup_type == AVOID or plan.entry is None or plan.reward_risk is None:
         return 0.0
+    return _confidence_ma_dc_volume(features, setup, plan, config)
 
+
+def _confidence_ma_dc_volume(
+    features: MarketFeatures,
+    setup: Setup,
+    plan: TradePlan,
+    config: StrategyConfig,
+) -> float:
+    """Volume-primary confidence.
+
+    Weights volume most heavily, then MA-trend quality, reward/risk asymmetry,
+    and setup family -- so the score reflects only MA + Donchian + volume.
+    """
     components = {
+        'volume': _volume_confidence_component(features),
         'trend': features.trend_score,
-        'rs': _relative_strength_component(features),
-        'setup': setup_quality(features, setup),
-        'volume': _volume_component(features),
-        'contraction': _contraction_component(features.contraction_ratio),
         'reward': _reward_component(plan.reward_risk, config),
+        'setup': setup_quality(features, setup),
     }
-    weights = config.confidence_weights
-    score = sum(weights[name] * value for name, value in components.items())
-    # Net distribution (more down- than up-volume) is a red flag that roughly
-    # halved realized expectancy in backtests; discount the score rather than
-    # zero it, so a strong setup under light distribution can still qualify.
+    score = sum(VOLUME_CONFIDENCE_WEIGHTS[name] * value for name, value in components.items())
     if features.updown_volume_ratio < 1.0:
         score *= DISTRIBUTION_DISCOUNT
     return round(100 * clamp(score), 1)
 
 
+def _volume_confidence_component(features: MarketFeatures) -> float:
+    """Blend relative volume, up/down accumulation, and OBV slope (all 0..1)."""
+    surge = clamp((features.rel_volume - 0.8) / 0.9)  # 0 at ~0.8x, 1 at ~1.7x
+    accumulation = clamp((features.updown_volume_ratio - 0.8) / 0.9)  # 0 at ~0.8, 1 at ~1.7
+    obv = clamp(features.obv_slope / 0.10)
+    return 0.5 * surge + 0.3 * accumulation + 0.2 * obv
+
+
 def composite_rank(confidence: float, context: MarketContext) -> float:
     """Confidence tilted by the market regime (risk-on amplifies, risk-off damps)."""
     return round(confidence * (0.7 + 0.3 * context.score), 2)
-
-
-def _relative_strength_component(features: MarketFeatures) -> float:
-    base = clamp((features.rs_outperformance + RS_NORM) / (2 * RS_NORM))
-    if features.rs_line_new_high:
-        base = clamp(base + 0.1)
-    return base
-
-
-def _volume_component(features: MarketFeatures) -> float:
-    accumulation = clamp(features.updown_volume_ratio - 1.0)
-    obv = clamp(features.obv_slope / 0.10)
-    return 0.6 * accumulation + 0.4 * obv
-
-
-def _contraction_component(contraction_ratio: float) -> float:
-    # ratio 0.7 -> ~1.0 (tight), ratio 1.1 -> 0.0 (expanding)
-    return clamp((1.1 - contraction_ratio) / 0.4)
 
 
 def _reward_component(reward_risk: float, config: StrategyConfig) -> float:
