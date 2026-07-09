@@ -70,6 +70,26 @@ def test_failed_refresh_falls_back_to_cache(tmp_path):
     assert float(out['AAA']['Close'].iloc[-1]) == 1.0  # served stale, not dropped
 
 
+def test_fetch_history_recovers_batch_dropped_ticker(tmp_path):
+    """A name the throttled bulk batch drops is retried solo, not lost."""
+    calls: list[list[str]] = []
+    base = _df(5.0)
+    client = YahooFinanceClient(Settings(), SQLiteCache(tmp_path))
+
+    def fake_batch(tickers, period='2y', interval='1d'):
+        calls.append(sorted(tickers))
+        if len(tickers) > 1:  # bulk batch drops BBB (throttled)
+            return {'AAA': base.copy()}
+        return {t: base.copy() for t in tickers}  # solo retry serves it
+
+    client._download_batch = fake_batch  # type: ignore[assignment]
+
+    out = client.fetch_history(['AAA', 'BBB'])
+    assert float(out['AAA']['Close'].iloc[-1]) == 5.0
+    assert float(out['BBB']['Close'].iloc[-1]) == 5.0  # recovered via solo retry
+    assert ['BBB'] in calls  # the dropped name was retried alone
+
+
 def _live_client(tmp_path, base, tail, calls):
     client = YahooFinanceClient(Settings(), SQLiteCache(tmp_path))
 

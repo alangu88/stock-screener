@@ -25,6 +25,11 @@ ALLOWED_EXCHANGES = {
     'BTS',  # Cboe BZX (e.g. CBOE; also lists some ETFs)
 }
 
+# Yahoo throttles large bulk downloads and silently drops a random subset, so
+# history is fetched in chunks of this size, with dropped names retried
+# individually afterward (see ``_download_with_recovery``).
+HISTORY_CHUNK_SIZE = 50
+
 
 @dataclass
 class Fundamentals:
@@ -107,7 +112,7 @@ class YahooFinanceClient:
             missing.append(ticker)
 
         if missing:
-            batch_data = self._download_batch(missing, period=period, interval=interval)
+            batch_data = self._download_with_recovery(missing, period=period, interval=interval)
             ttl_seconds = self.settings.cache_ttl_hours * 3600
             for ticker in missing:
                 cache_key = f'history:{ticker}:{period}:{interval}'
@@ -143,19 +148,7 @@ class YahooFinanceClient:
         """
         sorted_tickers = sorted(set(tickers))
         result = self.fetch_history(sorted_tickers, period=period, interval=interval)
-        tail = self._download_batch(sorted_tickers, period=tail_period, interval=interval)
-        # yfinance silently drops a random subset of names from a large batch when
-        # throttled, which would leave those prices stale. Retry the misses one at
-        # a time -- single-ticker downloads are far more reliable -- so every name
-        # still lands a fresh bar.
-        for ticker in sorted_tickers:
-            recent = tail.get(ticker)
-            if recent is not None and not recent.empty:
-                continue
-            retry = self._download_batch([ticker], period=tail_period, interval=interval)
-            got = retry.get(ticker)
-            if got is not None and not got.empty:
-                tail[ticker] = got
+        tail = self._download_with_recovery(sorted_tickers, period=tail_period, interval=interval)
         ttl_seconds = self.settings.cache_ttl_hours * 3600
         for ticker in sorted_tickers:
             recent = tail.get(ticker)
@@ -173,6 +166,41 @@ class YahooFinanceClient:
         combined = pd.concat([base, recent])
         combined = combined[~combined.index.duplicated(keep='last')]
         return combined.sort_index()
+
+    def _download_with_recovery(
+        self, tickers: list[str], period: str = '2y', interval: str = '1d'
+    ) -> dict[str, pd.DataFrame]:
+        """Download history in throttle-resistant chunks, recovering dropped names.
+
+        A single large ``yf.download`` gets throttled by Yahoo, which then silently
+        returns an empty frame for a random subset of the batch. Fetching in
+        smaller chunks cuts that truncation, and any name still missing after its
+        chunk is retried individually -- single-ticker downloads are far more
+        reliable -- so a throttled run does not lose live symbols to a false
+        "possibly delisted".
+        """
+        unique = list(dict.fromkeys(tickers))
+        result: dict[str, pd.DataFrame] = {}
+        for start in range(0, len(unique), HISTORY_CHUNK_SIZE):
+            chunk = unique[start:start + HISTORY_CHUNK_SIZE]
+            batch = self._download_batch(chunk, period=period, interval=interval)
+            for ticker in chunk:
+                df = batch.get(ticker)
+                if df is not None and not df.empty:
+                    result[ticker] = df
+        for ticker in [t for t in unique if t not in result]:
+            retry = self._download_batch([ticker], period=period, interval=interval)
+            df = retry.get(ticker)
+            if df is not None and not df.empty:
+                result[ticker] = df
+        still_missing = [t for t in unique if t not in result]
+        if still_missing:
+            preview = ', '.join(still_missing[:10]) + ('...' if len(still_missing) > 10 else '')
+            self.logger.warning(
+                '%s/%s symbols unavailable after retry (throttled or delisted): %s',
+                len(still_missing), len(unique), preview,
+            )
+        return result
 
     def _download_batch(
         self, tickers: list[str], period: str = '2y', interval: str = '1d'
