@@ -19,9 +19,9 @@ them by quality adjusted for the market regime.
 > Generated on demand via the **Daily Screen** workflow or `python scripts/generate_snapshot.py`. Mechanical, research-only.
 
 <!-- SCREENER:START -->
-![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-10-blue) ![Adds](https://img.shields.io/badge/adds-0-success)
+![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-11-blue) ![Adds](https://img.shields.io/badge/adds-0-success)
 
-_Last updated: 2026-07-09 19:34 UTC_
+_Last updated: 2026-07-29 15:08 UTC_
 
 > **Parameters:** Signal model ma_dc_volume_regime · Gates conf ≥ 80 & R/R ≥ 2.5 · Min avg volume 500,000
 
@@ -29,16 +29,17 @@ _Last updated: 2026-07-09 19:34 UTC_
 
 | Ticker | Setup | Confidence | R/R | Entry | Stop | Target | Rank Score | Beta | ATR % | Dist 200D % | Return 3M | Div Yield | Dollar ADV | Sector | Actionable |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AAPL | Avoid | 0 | 2.09 | 315.72 | 294.79 | 359.37 | 0.00 | 0.85 | 2.63% | 16.01% | 21.95% | 0.33% | 17,929,723,911 | Technology | No |
-| AMZN | Avoid | 0 | 3.38 | 245.85 | 231.31 | 295.05 | 0.00 | 1.42 | 3.13% | 5.41% | 11.12% | 0.00% | 12,566,723,988 | Consumer Cyclical | No |
-| BABA | Avoid | 0 | 3.14 | 111.61 | 98.22 | 153.71 | 0.00 | 1.24 | 3.56% | -23.50% | -10.94% | 6.65% | 1,426,555,085 | Consumer Cyclical | No |
-| CRWV | Avoid | 0 | 4.72 | 93.00 | 81.84 | 145.69 | 0.00 | 2.89 | 8.74% | -6.54% | 4.61% | 0.00% | 2,751,222,227 | Technology | No |
-| GOOGL | Avoid | 0 | 2.06 | 358.34 | 327.43 | 422.02 | 0.00 | 1.34 | 3.09% | 12.55% | 12.93% | 0.23% | 11,995,190,781 | Communication Services | No |
-| META | Avoid | 0 | 3.14 | 627.09 | 594.31 | 729.91 | 0.00 | 1.46 | 3.89% | -2.50% | 2.40% | 0.35% | 11,474,859,532 | Communication Services | No |
-| MSFT | Avoid | 0 | 3.17 | 383.17 | 346.20 | 500.29 | 0.00 | 0.78 | 3.13% | -13.49% | 2.36% | 0.93% | 15,756,868,158 | Technology | No |
-| NVDA | Avoid | 0 | 3.04 | 203.78 | 189.78 | 246.26 | 0.00 | 1.83 | 3.44% | 6.39% | 11.92% | 0.02% | 32,800,399,345 | Technology | No |
-| ORCL | Avoid | 0 | 12.17 | 144.50 | 135.24 | 257.20 | 0.00 | 1.80 | 6.39% | -26.52% | 0.59% | - | 4,029,947,168 | nan | No |
-| TSLA | Avoid | 0 | 1.83 | 405.86 | 363.75 | 482.86 | 0.00 | 2.13 | 4.78% | -2.97% | 18.24% | 0.00% | 20,057,595,264 | Consumer Cyclical | No |
+| AAPL | Avoid | 0 | 3.07 | 340.21 | 317.40 | 410.13 | 0.00 | 0.85 | 2.29% | 22.72% | 25.67% | 0.31% | 18,843,971,609 | Technology | No |
+| AMZN | Avoid | 0 | 11.80 | 228.28 | 225.53 | 260.81 | 0.00 | 1.44 | 2.93% | -2.72% | -12.10% | 0.00% | 10,983,659,938 | Consumer Cyclical | No |
+| BABA | Avoid | 0 | 30.90 | 114.76 | 113.79 | 144.63 | 0.00 | 1.27 | 3.08% | -18.89% | -12.30% | 6.29% | 1,376,903,143 | Consumer Cyclical | No |
+| CRWV | Avoid | 0 | 32.10 | 63.10 | 61.26 | 122.15 | 0.00 | 2.95 | 10.69% | -33.93% | -40.20% | 0.00% | 1,757,239,934 | Technology | No |
+| GOOGL | Avoid | 0 | 4.81 | 335.10 | 322.41 | 396.20 | 0.00 | 1.40 | 3.36% | 3.04% | -4.20% | 0.25% | 11,169,740,001 | Communication Services | No |
+| META | Avoid | 0 | 15.32 | 590.36 | 580.84 | 736.26 | 0.00 | 1.50 | 3.76% | -7.20% | -12.06% | 0.35% | 10,544,287,847 | Communication Services | No |
+| MSFT | Avoid | 0 | 2.70 | 395.52 | 374.52 | 452.30 | 0.00 | 0.76 | 2.91% | -8.90% | -7.86% | 0.91% | 15,484,523,939 | Technology | No |
+| NFLX | Avoid | 0 | 2.15 | 72.29 | 64.45 | 89.14 | 0.00 | 0.31 | 3.47% | -21.24% | -21.65% | 0.00% | 3,231,329,144 | Communication Services | No |
+| NVDA | Avoid | 0 | 6.75 | 192.70 | 189.06 | 217.29 | 0.00 | 1.87 | 3.87% | -0.16% | -9.60% | 0.02% | 29,016,265,584 | Technology | No |
+| ORCL | Avoid | 0 | 15.11 | 117.99 | 112.64 | 198.81 | 0.00 | 1.85 | 6.31% | -36.17% | -28.90% | 1.67% | 3,752,135,721 | Technology | No |
+| TSLA | Avoid | 0 | 20.99 | 302.71 | 296.41 | 434.88 | 0.00 | 2.24 | 5.65% | -26.66% | -19.50% | 0.00% | 13,527,080,001 | Consumer Cyclical | No |
 
 #### Recommended adds (clear the screen gates)
 
