@@ -19,9 +19,9 @@ them by quality adjusted for the market regime.
 > Generated on demand via the **Daily Screen** workflow or `python scripts/generate_snapshot.py`. Mechanical, research-only.
 
 <!-- SCREENER:START -->
-![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-17-blue) ![Adds](https://img.shields.io/badge/adds-0-success)
+![Regime](https://img.shields.io/badge/regime-Risk--On-informational) ![Watchlist](https://img.shields.io/badge/watchlist-17-blue) ![Adds](https://img.shields.io/badge/adds-1-success)
 
-_Last updated: 2026-09-08 22:38 UTC_
+_Last updated: 2026-09-19 21:01 UTC_
 
 > **Parameters:** Signal model ma_dc_volume_regime · Gates conf ≥ 80 & R/R ≥ 2.5 · Min avg volume 500,000
 
@@ -29,27 +29,29 @@ _Last updated: 2026-09-08 22:38 UTC_
 
 | Ticker | Setup | Confidence | R/R | Entry | Stop | Target | Rank Score | Beta | ATR % | Dist 200D % | Return 3M | Div Yield | Dollar ADV | Sector | Actionable |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AAPL | Pullback | 62 | 4.15 | 315.80 | 298.12 | 389.14 | 61.50 | 0.68 | 2.37% | 11.30% | 4.87% | 0.33% | 15,378,076,077 | Technology | Yes |
-| AMZN | Avoid | 0 | 14.69 | 256.97 | 252.81 | 318.01 | 0.00 | 1.41 | 2.52% | 7.39% | 4.79% | 0.00% | 10,843,690,578 | Consumer Cyclical | No |
-| APP | Avoid | 0 | 8.56 | 312.01 | 295.62 | 452.30 | 0.00 | 2.14 | 5.45% | -35.66% | -44.65% | 0.00% | 1,882,063,399 | Communication Services | No |
-| ASTS | Avoid | 0 | 2.81 | 66.12 | 58.19 | 88.40 | 0.00 | 3.71 | 6.92% | -18.82% | -28.18% | 0.00% | 901,182,949 | Technology | No |
-| BABA | Avoid | 0 | 5.93 | 112.66 | 108.80 | 135.56 | 0.00 | 1.28 | 3.10% | -16.68% | -6.17% | 6.40% | 1,375,977,741 | Consumer Cyclical | No |
-| CRDO | Avoid | 0 | 10.76 | 167.75 | 156.09 | 293.24 | 0.00 | 3.26 | 11.11% | -4.41% | -24.53% | 0.00% | 1,073,384,579 | Technology | No |
-| CRWV | Avoid | 0 | 5.74 | 99.83 | 89.90 | 156.77 | 0.00 | 3.32 | 6.78% | 8.99% | -2.48% | 0.00% | 2,737,263,594 | Technology | No |
-| GOOGL | Avoid | 0 | 14.47 | 338.36 | 334.21 | 398.40 | 0.00 | 1.36 | 2.36% | 0.64% | -6.87% | 0.25% | 9,176,589,282 | Communication Services | No |
-| IREN | Avoid | 0 | 9.40 | 46.93 | 44.76 | 67.29 | 0.00 | 3.84 | 7.56% | 2.80% | -20.71% | 0.00% | 2,127,145,897 | Financial Services | No |
-| META | Avoid | 0 | 4.63 | 613.48 | 591.82 | 713.79 | 0.00 | 1.41 | 3.22% | -1.43% | 4.80% | 0.34% | 11,052,514,553 | Communication Services | No |
-| MSFT | Avoid | 0 | 10.27 | 493.95 | 481.38 | 622.99 | 0.00 | 0.96 | 2.36% | 14.59% | 19.97% | 0.73% | 15,863,702,840 | Technology | No |
-| NFLX | Avoid | 0 | 9.01 | 76.77 | 75.32 | 89.82 | 0.00 | 0.27 | 3.11% | -11.45% | -7.10% | 0.00% | 2,957,790,225 | Communication Services | No |
-| NVDA | Avoid | 0 | 2.73 | 225.73 | 209.36 | 270.48 | 0.00 | 1.92 | 3.32% | 14.64% | 8.19% | 0.12% | 29,372,055,373 | Technology | No |
-| ORCL | Avoid | 0 | 2.88 | 162.52 | 143.02 | 218.72 | 0.00 | 2.06 | 4.39% | -3.55% | -23.27% | 1.26% | 5,160,104,813 | Technology | No |
-| RKLB | Avoid | 0 | 5.28 | 65.87 | 60.45 | 94.50 | 0.00 | 3.66 | 6.07% | -17.24% | -42.04% | 0.00% | 1,267,405,806 | Industrials | No |
-| TSLA | Avoid | 0 | 6.07 | 368.16 | 353.89 | 454.82 | 0.00 | 2.27 | 4.16% | -7.82% | -9.97% | 0.00% | 14,803,582,233 | Consumer Cyclical | No |
-| VST | Avoid | 0 | 6.12 | 151.72 | 148.04 | 174.21 | 0.00 | 1.49 | 3.60% | -3.76% | 3.28% | 0.61% | 662,435,251 | Utilities | No |
+| AAPL | Avoid | 0 | 2.13 | 336.13 | 318.32 | 374.05 | 0.00 | 0.68 | 2.17% | 17.39% | 12.79% | 0.31% | 16,174,437,349 | Technology | No |
+| META | Avoid | 0 | 3.26 | 665.75 | 618.85 | 818.63 | 0.00 | 1.37 | 3.19% | 6.66% | 15.34% | 0.31% | 11,964,088,062 | Communication Services | No |
+| TSLA | Avoid | 0 | 3.86 | 364.27 | 348.02 | 427.06 | 0.00 | 2.23 | 3.63% | -8.32% | -9.04% | 0.00% | 13,911,943,703 | Consumer Cyclical | No |
+| RKLB | Avoid | 0 | 5.23 | 64.57 | 59.53 | 90.89 | 0.00 | 3.65 | 6.04% | -19.76% | -39.79% | 0.00% | 1,196,868,740 | Industrials | No |
+| ORCL | Avoid | 0 | 3.91 | 147.61 | 139.09 | 180.88 | 0.00 | 2.06 | 5.18% | -11.21% | -19.90% | 1.33% | 4,763,665,216 | Technology | No |
+| NVDA | Avoid | 0 | 2.86 | 222.27 | 212.67 | 249.78 | 0.00 | 1.92 | 2.89% | 12.04% | 5.50% | 0.13% | 27,885,158,112 | Technology | No |
+| NFLX | Avoid | 0 | 5.90 | 71.79 | 69.50 | 85.28 | 0.00 | 0.29 | 3.39% | -16.02% | -7.22% | 0.00% | 2,697,188,670 | Communication Services | No |
+| MSFT | Avoid | 0 | 3.89 | 493.78 | 483.35 | 534.41 | 0.00 | 0.96 | 2.15% | 14.41% | 30.15% | 0.73% | 14,393,914,103 | Technology | No |
+| IREN | Avoid | 0 | 7.51 | 46.68 | 44.75 | 61.16 | 0.00 | 3.79 | 6.77% | 2.50% | -22.15% | 0.00% | 2,069,371,374 | Financial Services | No |
+| AMZN | Avoid | 0 | 3.28 | 253.71 | 242.79 | 289.55 | 0.00 | 1.43 | 2.38% | 5.58% | 3.81% | 0.00% | 10,088,766,746 | Consumer Cyclical | No |
+| GOOGL | Avoid | 0 | 5.23 | 349.54 | 343.48 | 381.24 | 0.00 | 1.35 | 2.40% | 3.57% | -5.02% | 0.24% | 9,519,521,497 | Communication Services | No |
+| CRWV | Avoid | 0 | 8.64 | 81.36 | 76.82 | 120.58 | 0.00 | 3.27 | 7.12% | -11.64% | -31.02% | 0.00% | 2,306,372,795 | Technology | No |
+| CRDO | Avoid | 0 | 37.73 | 175.89 | 172.26 | 312.99 | 0.00 | 3.26 | 8.13% | 0.03% | -35.29% | 0.00% | 1,143,723,666 | Technology | No |
+| BABA | Avoid | 0 | 3.51 | 113.24 | 105.85 | 139.17 | 0.00 | 1.24 | 2.80% | -15.04% | 5.73% | 6.67% | 1,240,386,547 | Consumer Cyclical | No |
+| ASTS | Avoid | 0 | 8.38 | 58.52 | 56.21 | 77.90 | 0.00 | 3.73 | 7.26% | -28.35% | -27.45% | 0.00% | 723,377,313 | Technology | No |
+| APP | Avoid | 0 | 4.43 | 308.06 | 296.00 | 361.49 | 0.00 | 2.08 | 5.32% | -35.19% | -34.41% | 0.00% | 1,858,432,315 | Communication Services | No |
+| VST | Avoid | 0 | 8.82 | 140.67 | 138.36 | 161.07 | 0.00 | 1.51 | 3.59% | -10.08% | -14.09% | 0.63% | 631,823,517 | Utilities | No |
 
 #### Recommended adds (clear the screen gates)
 
-_No candidates cleared the recommendation gates — sitting tight._
+| Ticker | Setup | Entry | Stop | Target | R/R | Confidence | Rank Score | Beta | ATR % | Dist 200D % | Return 3M | Div Yield | Dollar ADV | Sector |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| MPC | Breakout | 423.83 | 375.92 | 561.47 | 2.87 | 97 | 96.60 | -0.12 | 2.99% | 69.10% | 74.92% | 0.95% | 1,071,349,975 | Energy |
 
 > Mechanical signals for research only — not trade recommendations.
 <!-- SCREENER:END -->

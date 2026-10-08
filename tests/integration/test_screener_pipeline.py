@@ -7,7 +7,15 @@ from src.screener.strategy import StrategyConfig
 
 
 class _FakeFundamental:
-    def __init__(self, ticker: str, company_name: str, market_cap: float, pe: float, rev: float, exchange: str):
+    def __init__(
+        self,
+        ticker: str,
+        company_name: str,
+        market_cap: float,
+        pe: float,
+        rev: float,
+        exchange: str,
+    ):
         self.ticker = ticker
         self.company_name = company_name
         self.market_cap = market_cap
@@ -20,11 +28,11 @@ class _FakeFundamental:
 
 def _breakout_close() -> list[float]:
     """Long uptrend, a deep base that tightens near the highs, then a breakout."""
-    vals = [100.0 + i for i in range(200)]            # uptrend 100 -> 299
-    vals += [300.0 - j * (20.0 / 29) for j in range(30)]   # pullback 300 -> 280
-    vals += [280.0 + j * (26.0 / 19) for j in range(20)]   # recovery 280 -> 306
+    vals = [100.0 + i for i in range(200)]  # uptrend 100 -> 299
+    vals += [300.0 - j * (20.0 / 29) for j in range(30)]  # pullback 300 -> 280
+    vals += [280.0 + j * (26.0 / 19) for j in range(20)]  # recovery 280 -> 306
     vals += [305.0, 306.0, 307.0, 306.0, 305.0, 306.0, 307.0, 306.0, 307.0]  # tight handle
-    vals.append(313.0)                                 # breakout bar
+    vals.append(313.0)  # breakout bar
     return vals[:260]
 
 
@@ -80,6 +88,18 @@ def test_high_confidence_gate_filters_everything():
     assert out.empty
 
 
+def test_analyze_reports_filter_reasons_for_blocked_rows():
+    engine = ScreenerEngine(client=FakeClient())
+    universe = UniverseResult(tickers=['AAA'], companies={'AAA': 'A Co'})
+    cfg = FilterConfig(min_confidence=99.0, min_reward_risk=1.5, min_avg_volume=100)
+
+    out = engine.analyze(universe, cfg)
+
+    assert 'Filter Reasons' in out.columns
+    assert out['Actionable'].tolist() == [False]
+    assert 'confidence' in out['Filter Reasons'].iloc[0].lower()
+
+
 def test_analyze_returns_row_per_ticker_with_actionable_flag():
     engine = ScreenerEngine(client=FakeClient())
     universe = UniverseResult(tickers=['AAA', 'BBB'], companies={'AAA': 'A Co', 'BBB': 'B Co'})
@@ -102,9 +122,7 @@ class _RiskOffClient(FakeClient):
         if 'SPY' in data:
             idx = data['SPY'].index
             # Falling SPY: last close sits below its 200-day SMA (risk-off).
-            data['SPY']['Close'] = pd.Series(
-                [400.0 - i * 0.3 for i in range(len(idx))], index=idx
-            )
+            data['SPY']['Close'] = pd.Series([400.0 - i * 0.3 for i in range(len(idx))], index=idx)
         return data
 
 
@@ -119,13 +137,15 @@ def test_require_regime_suppresses_adds_when_risk_off():
 
     gated = engine.screen(
         universe,
-        FilterConfig(min_confidence=45.0, min_reward_risk=1.5,
-                     min_avg_volume=100, require_regime=True),
+        FilterConfig(
+            min_confidence=45.0, min_reward_risk=1.5, min_avg_volume=100, require_regime=True
+        ),
     )
     ungated = engine.screen(
         universe,
-        FilterConfig(min_confidence=45.0, min_reward_risk=1.5,
-                     min_avg_volume=100, require_regime=False),
+        FilterConfig(
+            min_confidence=45.0, min_reward_risk=1.5, min_avg_volume=100, require_regime=False
+        ),
     )
 
     # The same breakouts qualify without the gate, but the risk-off regime
@@ -140,13 +160,13 @@ def test_require_regime_allows_adds_when_risk_on():
 
     out = engine.screen(
         universe,
-        FilterConfig(min_confidence=45.0, min_reward_risk=1.5,
-                     min_avg_volume=100, require_regime=True),
+        FilterConfig(
+            min_confidence=45.0, min_reward_risk=1.5, min_avg_volume=100, require_regime=True
+        ),
     )
 
     # SPY is in an uptrend here, so the regime gate is a no-op.
     assert not out.empty
-
 
 
 def test_analyze_includes_non_actionable_rows():
@@ -171,4 +191,3 @@ def test_analyze_empty_universe_returns_empty_frame():
 
     assert out.empty
     assert 'Actionable' in out.columns
-

@@ -76,6 +76,22 @@ def test_signal_model_defaults_to_regime_and_accepts_supported_values() -> None:
     )
 
 
+def test_filter_config_uses_settings_gates() -> None:
+    from src.screener.engine import FilterConfig
+
+    settings = Settings(
+        min_avg_volume=250_000,
+        rec_min_confidence=72.0,
+        rec_min_reward_risk=2.2,
+        require_regime_for_adds=False,
+    )
+    cfg = FilterConfig.from_settings(settings)
+    assert cfg.min_confidence == 72.0
+    assert cfg.min_reward_risk == 2.2
+    assert cfg.min_avg_volume == 250_000
+    assert cfg.require_regime is False
+
+
 def test_signal_model_rejects_unknown_value() -> None:
     with pytest.raises(ConfigError):
         dataclasses.replace(Settings(), signal_model='unknown-model')

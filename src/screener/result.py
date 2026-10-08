@@ -34,6 +34,7 @@ RESULT_COLUMNS: tuple[str, ...] = (
     'Dollar ADV',
     'Div Yield',
     'Sector',
+    'Sector Trend',
     'Market Cap',
     'PE Ratio',
     'Revenue Growth',

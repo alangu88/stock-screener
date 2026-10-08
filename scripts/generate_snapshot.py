@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -72,12 +73,22 @@ def _regime_label(*frames) -> str:
     return 'Unknown'
 
 
+def _status(message: str, *, step: str | None = None, done: bool = False) -> None:
+    prefix = '✓' if done else '…'
+    if step:
+        print(f'[{step}] {prefix} {message}', flush=True)
+    else:
+        print(f'{prefix} {message}', flush=True)
+
+
 def main() -> int:
     settings = load_settings()
     max_symbols = _env_int('SCREENER_SNAPSHOT_SYMBOLS', DEFAULT_SYMBOLS)
     limit = max(1, _env_int('SCREENER_SNAPSHOT_LIMIT', DEFAULT_LIMIT))
     generated_at = datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')
+    started_at = time.perf_counter()
 
+    _status('Starting snapshot generation', step='1/5')
     cache = SQLiteCache(settings.cache_dir)
     client = YahooFinanceClient(settings=settings, cache=cache)
     engine = ScreenerEngine(
@@ -86,17 +97,17 @@ def main() -> int:
     )
 
     watchlist = sorted({normalize_ticker(t) for t in watchlist_tickers(WATCHLIST_PATH)})
+    _status(f'Loaded {len(watchlist)} watchlist symbols', step='1/5', done=True)
 
     try:
+        _status('Loading S&P 500 universe and market metadata…', step='2/5')
         sp500 = load_sp500_universe(cache)
         companies = dict(sp500.companies)
 
         # Recommended adds: screen the S&P 500 (plus watchlist) at the tight add
         # gates. Names already held are kept -- a fresh setup on an existing
         # position is still a valid add.
-        add_tickers = _trim_tickers(
-            list(dict.fromkeys([*sp500.tickers, *watchlist])), max_symbols
-        )
+        add_tickers = _trim_tickers(list(dict.fromkeys([*sp500.tickers, *watchlist])), max_symbols)
         add_universe = UniverseResult(tickers=add_tickers, companies=companies)
         add_config = FilterConfig(
             min_confidence=settings.rec_min_confidence,
@@ -104,14 +115,17 @@ def main() -> int:
             min_avg_volume=settings.min_avg_volume,
             require_regime=settings.require_regime_for_adds,
         )
+        _status(f'Screening {len(add_tickers)} symbols for actionable setups…', step='3/5')
         recommended = engine.screen(add_universe, config=add_config)
 
         # Watchlist monitor: ungated analysis of every followed name.
         watch_universe = UniverseResult(
             tickers=watchlist, companies={t: companies.get(t, '') for t in watchlist}
         )
+        _status('Reviewing watchlist coverage…', step='4/5')
         watch_df = engine.analyze(watch_universe, config=FilterConfig.from_settings(settings))
 
+        _status('Rendering markdown snapshot…', step='5/5')
         block = build_snapshot_markdown(
             watch_df,
             recommended,
@@ -122,20 +136,25 @@ def main() -> int:
             limit=limit,
         )
         print(
-            f'Watchlist {len(watchlist)} names; screened {len(add_tickers)} '
+            f'✓ Snapshot ready: watchlist {len(watchlist)} names; screened {len(add_tickers)} '
             f'-> {len(recommended)} recommended adds.'
         )
     except Exception as exc:  # network / data feed problems must not break the README
         block = build_unavailable_markdown(generated_at=generated_at, reason=type(exc).__name__)
         _LOGGER.exception('Snapshot generation failed: %s', type(exc).__name__)
+        print(
+            f'⚠ Snapshot generation failed: {type(exc).__name__}. README left with a safe unavailable notice.',
+            flush=True,
+        )
 
     readme = README_PATH.read_text(encoding='utf-8')
     updated = inject_between_markers(readme, block)
     if updated != readme:
         README_PATH.write_text(updated, encoding='utf-8')
-        print('README updated.')
+        elapsed = time.perf_counter() - started_at
+        print(f'✓ README updated successfully in {elapsed:.1f}s.', flush=True)
     else:
-        print('README unchanged.')
+        print('✓ README unchanged.', flush=True)
     return 0
 
 

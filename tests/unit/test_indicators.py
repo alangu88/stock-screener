@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.analysis.indicators import ema, rsi, sma
+from src.analysis.indicators import cci, ema, macd, rsi, sma
 
 
 def test_sma_rolling_mean():
@@ -26,3 +26,21 @@ def test_sma_over_volume_window():
     s = pd.Series([100, 200, 300, 400, 500], dtype=float)
     out = sma(s, 2)
     assert float(out.iloc[-1]) == 450.0
+
+
+def test_cci_is_finite_for_uptrend_data():
+    close = pd.Series(range(100, 180), dtype=float)
+    high = close + 2
+    low = close - 2
+    out = cci(high, low, close, period=10)
+    valid = out.dropna()
+    assert not valid.empty
+    assert ((valid >= -200) & (valid <= 200)).all()
+
+
+def test_macd_produces_signal_and_histogram():
+    close = pd.Series(range(100, 180), dtype=float)
+    macd_line, signal_line, histogram = macd(close, fast=12, slow=26, signal=9)
+    assert not macd_line.dropna().empty
+    assert not signal_line.dropna().empty
+    assert not histogram.dropna().empty

@@ -25,6 +25,27 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return rsi_series.fillna(50)
 
 
+def cci(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 20) -> pd.Series:
+    """Commodity Channel Index (typical price deviation from mean)."""
+    tp = (high + low + close) / 3.0
+    sma_tp = tp.rolling(window=period, min_periods=period).mean()
+    mean_dev = (tp - sma_tp).abs().rolling(window=period, min_periods=period).mean()
+    denom = mean_dev.replace(0, np.nan)
+    return ((tp - sma_tp) / (0.015 * denom)).fillna(0.0)
+
+
+def macd(
+    series: pd.Series, *, fast: int = 12, slow: int = 26, signal: int = 9
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """MACD line, signal line, and histogram."""
+    fast_ema = series.ewm(span=fast, adjust=False, min_periods=fast).mean()
+    slow_ema = series.ewm(span=slow, adjust=False, min_periods=slow).mean()
+    macd_line = fast_ema - slow_ema
+    signal_line = macd_line.ewm(span=signal, adjust=False, min_periods=signal).mean()
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
 def atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     """Average True Range (Wilder's smoothing)."""
     prev_close = close.shift(1)
@@ -86,5 +107,14 @@ def compute_indicators(
     for window in ema_windows:
         out[f'EMA{window}'] = ema(out['Close'], window)
     out['RSI'] = rsi(out['Close'], rsi_period)
+    out['CCI'] = cci(
+        df['High'].reindex(out.index).fillna(out['Close']),
+        df['Low'].reindex(out.index).fillna(out['Close']),
+        out['Close'],
+    )
+    macd_line, signal_line, histogram = macd(out['Close'])
+    out['MACD'] = macd_line
+    out['MACD_SIGNAL'] = signal_line
+    out['MACD_HIST'] = histogram
     out['VOL_AVG'] = sma(out['Volume'], volume_window)
     return out

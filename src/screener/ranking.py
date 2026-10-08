@@ -30,6 +30,26 @@ from src.utils.numeric import clamp
 DISTRIBUTION_DISCOUNT = 0.90  # multiplier applied when up/down volume < 1.0
 
 
+def sector_trend_score(
+    ticker_return: float, peer_returns: tuple[float, ...], market_return: float
+) -> float:
+    """Normalize a stock's peer-group leadership signal from 0..1.
+
+    This is a real market-derived proxy for industry strength: a name that is
+    beating its sector median and the broader tape while its peers are also
+    trending higher receives a higher score. It is not external news sentiment;
+    it is data-driven leadership and breadth.
+    """
+    if not peer_returns:
+        return 0.0
+    peer_median = float(pd.Series(peer_returns).median())
+    sector_breadth = float(sum(r > market_return for r in peer_returns) / len(peer_returns))
+    sector_momentum = clamp((peer_median - market_return + 0.10) / 0.25)
+    relative_lead = clamp((ticker_return - peer_median + 0.10) / 0.20)
+    score = 0.55 * sector_momentum + 0.45 * relative_lead + 0.10 * sector_breadth
+    return clamp(score)
+
+
 def regime_suppresses_entry(signal_model: str, risk_on: bool, setup_type: str) -> bool:
     """Whether the regime-aware model drops this entry.
 
@@ -39,17 +59,20 @@ def regime_suppresses_entry(signal_model: str, risk_on: bool, setup_type: str) -
     profitable risk-on book and risk-off pullbacks untouched.
     """
     return (
-        signal_model == SIGNAL_MODEL_MA_DC_VOLUME_REGIME
-        and not risk_on
-        and setup_type == BREAKOUT
+        signal_model == SIGNAL_MODEL_MA_DC_VOLUME_REGIME and not risk_on and setup_type == BREAKOUT
     )
 
-# Volume-primary confidence weights. Sum to 1.0 across the four components.
+
+# Volume-primary confidence weights. Sum to 1.0 across the scoring components.
+# We add a lightweight industry/trend contribution so relative strength and
+# recent breadth help rank leaders without turning the model into a noisy
+# all-signal blender.
 VOLUME_CONFIDENCE_WEIGHTS = {
-    'volume': 0.40,
-    'trend': 0.25,
-    'reward': 0.20,
+    'volume': 0.35,
+    'trend': 0.20,
+    'reward': 0.15,
     'setup': 0.15,
+    'industry': 0.15,
 }
 
 
@@ -78,10 +101,11 @@ def confidence_score(
     setup: Setup,
     plan: TradePlan,
     config: StrategyConfig,
+    sector_strength: float = 0.0,
 ) -> float:
     if setup.setup_type == AVOID or plan.entry is None or plan.reward_risk is None:
         return 0.0
-    return _confidence_ma_dc_volume(features, setup, plan, config)
+    return _confidence_ma_dc_volume(features, setup, plan, config, sector_strength)
 
 
 def _confidence_ma_dc_volume(
@@ -89,6 +113,7 @@ def _confidence_ma_dc_volume(
     setup: Setup,
     plan: TradePlan,
     config: StrategyConfig,
+    sector_strength: float = 0.0,
 ) -> float:
     """Volume-primary confidence.
 
@@ -100,6 +125,7 @@ def _confidence_ma_dc_volume(
         'trend': features.trend_score,
         'reward': _reward_component(plan.reward_risk, config),
         'setup': setup_quality(features, setup),
+        'industry': _industry_trend_component(features, sector_strength),
     }
     score = sum(VOLUME_CONFIDENCE_WEIGHTS[name] * value for name, value in components.items())
     if features.updown_volume_ratio < 1.0:
@@ -113,6 +139,18 @@ def _volume_confidence_component(features: MarketFeatures) -> float:
     accumulation = clamp((features.updown_volume_ratio - 0.8) / 0.9)  # 0 at ~0.8, 1 at ~1.7
     obv = clamp(features.obv_slope / 0.10)
     return 0.5 * surge + 0.3 * accumulation + 0.2 * obv
+
+
+def _industry_trend_component(features: MarketFeatures, sector_strength: float = 0.0) -> float:
+    """Proxy for market/industry leadership from relative strength and breadth.
+
+    This is intentionally lightweight: it reinforces names leading the tape and
+    their peer group without introducing an external-news dependency.
+    """
+    relative_strength = clamp((features.rs_outperformance + 0.20) / 0.80)
+    breadth = clamp((features.return_3m + 0.15) / 0.65)
+    sector_component = clamp(sector_strength)
+    return 0.45 * relative_strength + 0.30 * breadth + 0.25 * sector_component
 
 
 def composite_rank(confidence: float, context: MarketContext) -> float:

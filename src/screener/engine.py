@@ -15,6 +15,7 @@ from src.screener.ranking import (
     composite_rank,
     confidence_score,
     regime_suppresses_entry,
+    sector_trend_score,
 )
 from src.screener.result import RESULT_COLUMNS
 from src.screener.setups import AVOID, Setup, detect_setup
@@ -52,11 +53,13 @@ ANALYSIS_COLUMNS: tuple[str, ...] = (
     'Dollar ADV',
     'Div Yield',
     'Sector',
+    'Sector Trend',
     'Market Cap',
     'PE Ratio',
     'Revenue Growth',
     'Price',
     'Market Context',
+    'Filter Reasons',
     'Actionable',
 )
 
@@ -71,6 +74,7 @@ class _TickerAnalysis:
     confidence: float
     fundamental: Fundamentals
     company_name: str
+    sector_strength: float = 0.0
 
 
 @dataclass
@@ -83,6 +87,7 @@ class _ScreenInputs:
     benchmark_close: pd.Series
     context: MarketContext
     regime_ok: bool
+    sector_scores: dict[str, float]
 
 
 @dataclass
@@ -102,7 +107,12 @@ class FilterConfig:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> FilterConfig:
-        return cls(min_avg_volume=settings.min_avg_volume)
+        return cls(
+            min_confidence=settings.rec_min_confidence,
+            min_reward_risk=settings.rec_min_reward_risk,
+            min_avg_volume=settings.min_avg_volume,
+            require_regime=settings.require_regime_for_adds,
+        )
 
 
 class ScreenerEngine:
@@ -156,17 +166,22 @@ class ScreenerEngine:
         rows = []
         for ticker in inputs.tickers:
             analysis = self._compute_ticker(
-                ticker, inputs.history.get(ticker), inputs.benchmark_close, inputs.fundamentals, universe
+                ticker,
+                inputs.history.get(ticker),
+                inputs.benchmark_close,
+                inputs.fundamentals,
+                universe,
+                inputs.sector_scores.get(ticker, 0.0),
             )
             if analysis is not None:
-                rows.append(self._analysis_row(ticker, analysis, inputs.context, config, inputs.regime_ok))
+                rows.append(
+                    self._analysis_row(ticker, analysis, inputs.context, config, inputs.regime_ok)
+                )
         if not rows:
             return _empty_analysis_frame()
         return pd.DataFrame(rows).reindex(columns=list(ANALYSIS_COLUMNS))
 
-    def _fetch_inputs(
-        self, universe: UniverseResult, force_refresh: bool
-    ) -> _ScreenInputs | None:
+    def _fetch_inputs(self, universe: UniverseResult, force_refresh: bool) -> _ScreenInputs | None:
         """Fetch the shared market data both ``screen`` and ``analyze`` need.
 
         Returns ``None`` when there is nothing to evaluate -- an empty universe
@@ -178,14 +193,61 @@ class ScreenerEngine:
         allowed, _ = self.client.filter_allowed_exchanges(fundamentals)
         if not allowed:
             return None
-        history = self.client.fetch_history(allowed, period=HISTORY_PERIOD, force_refresh=force_refresh)
+        history = self.client.fetch_history(
+            allowed, period=HISTORY_PERIOD, force_refresh=force_refresh
+        )
         benchmark_close = self._benchmark_close(force_refresh)
         context = assess_market_context(benchmark_close, self.strategy)
         regime_ok = _regime_ok(benchmark_close, self.strategy)
-        return _ScreenInputs(fundamentals, allowed, history, benchmark_close, context, regime_ok)
+        sector_scores = self._build_sector_scores(allowed, fundamentals, history, benchmark_close)
+        return _ScreenInputs(
+            fundamentals, allowed, history, benchmark_close, context, regime_ok, sector_scores
+        )
+
+    def _build_sector_scores(
+        self,
+        tickers: list[str],
+        fundamentals: dict[str, Fundamentals],
+        history: dict[str, pd.DataFrame],
+        benchmark_close: pd.Series,
+    ) -> dict[str, float]:
+        """Compute a market-derived sector leadership score for each ticker."""
+        market_return = _history_return(benchmark_close)
+        by_sector: dict[str, list[str]] = {}
+        for ticker in tickers:
+            sector = (
+                fundamentals.get(ticker) or Fundamentals(ticker, None, None, None, None, None)
+            ).sector
+            if sector is None:
+                continue
+            by_sector.setdefault(sector, []).append(ticker)
+
+        sector_scores: dict[str, float] = {}
+        for ticker in tickers:
+            sector = (
+                fundamentals.get(ticker) or Fundamentals(ticker, None, None, None, None, None)
+            ).sector
+            if sector is None:
+                sector_scores[ticker] = 0.0
+                continue
+            peers = [peer for peer in by_sector.get(sector, []) if peer != ticker]
+            peer_returns = []
+            for peer in peers:
+                close = history.get(peer, pd.DataFrame()).get('Close')
+                if close is not None and not close.empty:
+                    peer_returns.append(_history_return(close))
+            stock_return = _history_return(
+                history.get(ticker, pd.DataFrame()).get('Close', pd.Series(dtype=float))
+            )
+            sector_scores[ticker] = sector_trend_score(
+                stock_return, tuple(peer_returns), market_return
+            )
+        return sector_scores
 
     def _benchmark_close(self, force_refresh: bool) -> pd.Series:
-        history = self.client.fetch_history([BENCHMARK_TICKER], period=HISTORY_PERIOD, force_refresh=force_refresh)
+        history = self.client.fetch_history(
+            [BENCHMARK_TICKER], period=HISTORY_PERIOD, force_refresh=force_refresh
+        )
         benchmark = history.get(BENCHMARK_TICKER, pd.DataFrame())
         return benchmark.get('Close', pd.Series(dtype=float)).dropna()
 
@@ -198,7 +260,12 @@ class ScreenerEngine:
     ) -> dict | None:
         """Return a result row for an actionable candidate, else ``None``."""
         analysis = self._compute_ticker(
-            ticker, inputs.history.get(ticker), inputs.benchmark_close, inputs.fundamentals, universe
+            ticker,
+            inputs.history.get(ticker),
+            inputs.benchmark_close,
+            inputs.fundamentals,
+            universe,
+            inputs.sector_scores.get(ticker, 0.0),
         )
         if analysis is None or not self._passes_gates(analysis, config, inputs.regime_ok):
             return None
@@ -217,6 +284,7 @@ class ScreenerEngine:
             analysis.confidence,
             rank,
             inputs.context,
+            analysis.sector_strength,
         )
 
     def _analysis_row(
@@ -247,8 +315,11 @@ class ScreenerEngine:
             analysis.confidence,
             rank,
             context,
+            analysis.sector_strength,
         )
-        row['Actionable'] = self._passes_gates(analysis, config, regime_ok)
+        actionable, reasons = self._gate_check(analysis, config, regime_ok)
+        row['Filter Reasons'] = '; '.join(reasons)
+        row['Actionable'] = actionable
         return row
 
     def _compute_ticker(
@@ -258,6 +329,7 @@ class ScreenerEngine:
         benchmark_close: pd.Series,
         fundamentals: dict[str, Fundamentals],
         universe: UniverseResult,
+        sector_strength: float = 0.0,
     ) -> _TickerAnalysis | None:
         """Compute features/setup/plan/confidence for a ticker (no gating).
 
@@ -268,27 +340,52 @@ class ScreenerEngine:
             return None
         setup = detect_setup(features, self.strategy)
         plan = build_trade_plan(features, setup, self.strategy)
-        confidence = confidence_score(features, setup, plan, self.strategy)
+        confidence = confidence_score(
+            features, setup, plan, self.strategy, sector_strength=sector_strength
+        )
         fundamental = fundamentals.get(ticker) or Fundamentals(ticker, None, None, None, None, None)
         company_name = fundamental.company_name or universe.companies.get(ticker, '')
-        return _TickerAnalysis(features, setup, plan, confidence, fundamental, company_name)
+        return _TickerAnalysis(
+            features,
+            setup,
+            plan,
+            confidence,
+            fundamental,
+            company_name,
+            sector_strength=sector_strength,
+        )
 
-    def _passes_gates(self, analysis: _TickerAnalysis, config: FilterConfig,
-                      risk_on: bool = True) -> bool:
-        """Return whether an analysis clears the screen's actionability gates."""
+    def _gate_check(
+        self, analysis: _TickerAnalysis, config: FilterConfig, risk_on: bool = True
+    ) -> tuple[bool, list[str]]:
+        """Return whether an analysis clears the screen gates and why it failed."""
+        reasons: list[str] = []
         if analysis.features.avg_volume < config.min_avg_volume:
-            return False
+            reasons.append(
+                f'avg volume {analysis.features.avg_volume:,.0f} < {config.min_avg_volume:,.0f}'
+            )
         if analysis.setup.setup_type == AVOID:
-            return False
+            reasons.append(f'setup {analysis.setup.setup_type} is not actionable')
         if regime_suppresses_entry(self.strategy.signal_model, risk_on, analysis.setup.setup_type):
-            return False
+            reasons.append('market regime suppresses new adds')
         if config.setups is not None and analysis.setup.setup_type not in config.setups:
-            return False
-        if analysis.plan.reward_risk is None or analysis.plan.reward_risk < config.min_reward_risk:
-            return False
+            reasons.append(f'unwanted setup {analysis.setup.setup_type}')
+        if analysis.plan.reward_risk is None:
+            reasons.append('reward:risk undefined')
+        elif analysis.plan.reward_risk < config.min_reward_risk:
+            reasons.append(
+                f'reward:risk {analysis.plan.reward_risk:.2f} < {config.min_reward_risk:.2f}'
+            )
         if analysis.confidence < config.min_confidence:
-            return False
-        return True
+            reasons.append(f'confidence {analysis.confidence:.1f} < {config.min_confidence:.1f}')
+        return not reasons, reasons
+
+    def _passes_gates(
+        self, analysis: _TickerAnalysis, config: FilterConfig, risk_on: bool = True
+    ) -> bool:
+        """Return whether an analysis clears the screen's actionability gates."""
+        actionable, _ = self._gate_check(analysis, config, risk_on)
+        return actionable
 
 
 def _result_row(
@@ -301,6 +398,7 @@ def _result_row(
     confidence: float,
     rank: float,
     context: MarketContext,
+    sector_strength: float = 0.0,
 ) -> dict:
     return {
         'Ticker': ticker,
@@ -327,12 +425,28 @@ def _result_row(
         'Dollar ADV': features.avg_volume * features.price,
         'Div Yield': fundamental.dividend_yield,
         'Sector': fundamental.sector,
+        'Sector Trend': sector_strength,
         'Market Cap': fundamental.market_cap,
         'PE Ratio': fundamental.pe_ratio,
         'Revenue Growth': fundamental.revenue_growth,
         'Price': features.price,
         'Market Context': context.label,
     }
+
+
+def _history_return(series: pd.Series) -> float:
+    if series is None or series.empty:
+        return 0.0
+    close = pd.Series(series).dropna()
+    if close.empty:
+        return 0.0
+    if len(close) <= 63:
+        base = close.iloc[0]
+    else:
+        base = close.iloc[-64]
+    if not pd.notna(base) or base == 0:
+        return 0.0
+    return float((close.iloc[-1] / base) - 1.0)
 
 
 def _regime_ok(benchmark_close: pd.Series, strategy: StrategyConfig) -> bool:
@@ -354,4 +468,3 @@ def _empty_frame() -> pd.DataFrame:
 
 def _empty_analysis_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=list(ANALYSIS_COLUMNS))
-
